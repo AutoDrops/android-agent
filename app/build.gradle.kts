@@ -3,11 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+    id("app.cash.paparazzi")
 }
 android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
-    defaultConfig { applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 2; versionName = "2.0" }
+    defaultConfig { applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 3; versionName = "3.0" }
     buildFeatures { compose = true; buildConfig = true }
     testOptions { unitTests { isIncludeAndroidResources = true; isReturnDefaultValues = true } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
