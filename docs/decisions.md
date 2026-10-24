@@ -99,3 +99,51 @@ Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; 
 ### Tests / build
 - Full suite green: **72 unit tests pass** (added V34Test: SHA-256 vectors, catalog validity, JSON round-trip, profile disable-sets, recipe bounds, honest LLM status). Paparazzi snapshots recorded incl. new `localModelV34`.
 - Secret scan clean: no key prefix / `sk-or-v1-…` in tracked files; local.properties + *.apk untracked. Build-time key embedded (len 73, starts sk-or) WITHOUT printing.
+
+---
+
+## v3.5 — Real on-device inference (MediaPipe LLM Inference) (2026-10-24)
+
+### Models consulted (OpenRouter only)
+- Gemini amplification: `google/gemini-2.5-pro` — cost **$0.043285** (gemini_v35.md)
+- Codex advisory review: `openai/gpt-5` — cost **$0.069535** (codex_v35.md)
+- **Total v3.5 model spend: $0.11282** (budget ~$2)
+
+### Shipped
+- **REAL on-device inference engine** via MediaPipe LLM Inference (`com.google.mediapipe:tasks-genai:0.10.24`). Native `libllm_inference_engine_jni.so` packaged for arm64-v8a (12MB) + armeabi-v7a (7.7MB); `LlmInference` dexed. `LocalLlm` builds `LlmInferenceOptions`, `createFromOptions`, and calls a genuine `generateResponse()` path. `ENGINE_PRESENT=true`, `ENGINE_LINKED` detects the bundled engine.
+- **Honest status:** generation is **wired + compiled + native .so packaged, but UNVERIFIED on a physical device** (no emulator/KVM in the build sandbox). Errors from the native layer are surfaced in chat, never faked. UI copy explicitly states first-run is not device-verified.
+- **Runnable model:** free, SHA-256-pinned `Qwen2.5-0.5B-Instruct` MediaPipe `.task` (~521MB, litert-community) via the existing verify-on-download manager. GGUF entries kept (download+verify real; llama.cpp inference still pending — labeled).
+- **Chat ⚡ button** runs offline generation when a runnable model is on disk; cancelable via stop.
+- Unit tests (`V35Test`, Robolectric): engine linkage (class bundled), catalog pinned-model validity, gguf filename gating, JSON round-trip, generate-before-load null+error, ensureLoaded presence/non-runnable gating, status gating.
+
+### Vosk offline voice (priority 2) — DEFERRED (size tradeoff, documented)
+- Decision: **NOT bundled this release.** MediaPipe already added ~19MB (APK 29MB→48MB). Vosk-android adds another native lib (~5-10MB) plus a model download (small UA/EN Vosk model ~40-50MB, full ~1.5GB). To keep the APK in check, kept existing Android `SpeechRecognizer` push-to-talk; Vosk download-path can be added in v3.6 like the model manager. Tradeoff logged per request.
+
+### Minor (priority 3)
+- OpenRouter catalog categories (Код/Мислення/Швидкі/Творчі/Топ + search) and «Оновити» (force-live refresh) confirmed working. Browser-login (`WebChatActivity`) intact.
+
+### Codex (gpt-5) objections — accept/reject
+- HIGH native engine not closed on replace / lifecycle → **ACCEPT**: `ensureLoaded` closes previous engine; `unload()` on `onCleared`, on model delete, and reused serial dispatcher.
+- HIGH low-RAM gating → **ACCEPT**: `ActivityManager.isLowRamDevice` warns + lowers maxTokens to 256.
+- HIGH post-download integrity recheck → **ACCEPT**: `ensureLoaded` re-verifies SHA-256 before engine creation (cached `.ok` marker).
+- HIGH `isOnline()` default true on exception → **ACCEPT**: now defaults **false** (privacy-safe).
+- HIGH ENGINE_LINKED false positive (resource present, .so missing) → **PARTIAL**: kept Class.forName primary signal; actual native readiness surfaced honestly on first `ensureLoaded` (errors shown). Full native self-check deferred.
+- MED R8/reflection → **ACCEPT**: added `proguard-rules.pro` `-keep` for `com.google.mediapipe.**` + release buildType wiring.
+- MED delete loaded model doesn't unload → **ACCEPT** (see HIGH #1); also deletes `.ok` marker.
+- MED disk-space preflight → **ACCEPT**: `StatFs` requires sizeMb*1.2 free before download.
+- MED UI overpromises readiness → **ACCEPT**: copy qualified ("не перевірено на твоєму пристрої").
+- MED heavy work on Dispatchers.Default → **ACCEPT**: dedicated `Dispatchers.IO.limitedParallelism(1)`.
+- MED armeabi-v7a may lack .so → **REJECT**: verified the v7a `.so` IS packaged (7.7MB); both ABIs valid.
+- MED path traversal on model id → **ACCEPT**: `fileName()` sanitizes id to `[A-Za-z0-9._-]`.
+- MED error leaks paths → **ACCEPT (existing)**: errors routed through `Protocols.friendlyError`.
+- LOW token/prompt caps → **ACCEPT**: maxTokens device-class dependent, coerced 64..1024.
+- LOW cancel local generation → **ACCEPT**: `stopLocal()` + chat stop button.
+- LOW localReady gates on file only → **KEEP**: button triggers load which surfaces errors honestly.
+- LOW cert pinning → **REJECT**: brittle vs HF CDN cert rotation; SHA-256 pinning used instead (same rationale as v3.4).
+
+### Gemini (gemini-2.5-pro) key points
+- Streaming via `generateResponseAsync()` (future UX win); auto offline-fallback on network error; pre-warm engine; dedicated inference dispatcher (**adopted**); foreground-service for 521MB download; on-device OCR→LLM chaining; low-RAM graceful degradation (**adopted**); enforce pinned-hash-only loading (**adopted via integrity recheck**). Pitfalls: native SIGSEGV/OOM, R8 stripping reflection (**keep rules added**), supply-chain poisoning of unpinned GGUF.
+
+### Tests / build / size
+- Full suite green (Robolectric + Paparazzi). Secret scan clean; build-time key embedded (len 73, sk-or) without printing.
+- **APK size: ~48MB** (v3.4 ~29MB → +~19MB) due to MediaPipe native engine for 2 ABIs. Noted per request; arm-only abiFilters used to avoid +28MB of x86 libs.

@@ -202,6 +202,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     fun modelSizeMb(m: LocalModel) = (modelMgr.sizeOnDisk(m) / 1_048_576L).toInt()
     fun downloadModel(m: LocalModel) {
         if (modelDownloading != null) return
+        val free = runCatching { val sf = android.os.StatFs(getApplication<android.app.Application>().filesDir.path); sf.availableBytes }.getOrDefault(Long.MAX_VALUE)
+        if (free < m.sizeMb * 1_258_291L /* sizeMb*1.2MB */) { modelStatus = "Недостатньо місця: потрібно ~${(m.sizeMb*1.2).toInt()} МБ вільного."; return }
         modelDownloading = m.id; modelProgress = 0f; modelStatus = "Завантаження ${m.name}…"
         viewModelScope.launch {
             val p = modelMgr.download(m) { pr -> if (pr.totalBytes > 0) modelProgress = pr.downloadedBytes.toFloat() / pr.totalBytes }
@@ -215,8 +217,52 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
             modelDownloading = null
         }
     }
-    fun deleteModel(m: LocalModel) { modelMgr.delete(m); if (store.selectedLocalModel == m.id) store.selectedLocalModel = ""; modelStatus = "Видалено ${m.name}." }
+    fun deleteModel(m: LocalModel) {
+        if (LocalLlm.loadedId == m.id) LocalLlm.unload()
+        modelMgr.delete(m); java.io.File(modelMgr.fileFor(m).parentFile, modelMgr.fileFor(m).name + ".ok").delete()
+        if (store.selectedLocalModel == m.id) store.selectedLocalModel = ""; modelStatus = "Видалено ${m.name}."
+    }
     fun localLlmStatus(m: LocalModel) = LocalLlm.status(modelMgr.isDownloaded(m))
+
+    // ---- v3.5: real on-device inference (MediaPipe) ----
+    val engineLinked = LocalLlm.ENGINE_LINKED
+    var localBusy by mutableStateOf(false)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val llmDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(1)
+    private var localJob: kotlinx.coroutines.Job? = null
+    private fun lowRam(): Boolean = runCatching {
+        val am = getApplication<android.app.Application>().getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.isLowRamDevice
+    }.getOrDefault(false)
+    fun stopLocal() { localJob?.cancel(); LocalLlm.unload(); localBusy = false }
+    override fun onCleared() { super.onCleared(); runCatching { LocalLlm.unload() } }
+    /** The runnable (.task) model currently on disk, if any. */
+    fun runnableModelOnDisk(): LocalModel? = ModelCatalogLocal.runnable().firstOrNull { modelMgr.isDownloaded(it) }
+    fun localReady(): Boolean = engineLinked && runnableModelOnDisk() != null
+    fun isOnline(): Boolean = runCatching {
+        val cm = getApplication<android.app.Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val n = cm.activeNetwork ?: return false
+        val c = cm.getNetworkCapabilities(n) ?: return false
+        c.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }.getOrDefault(false)
+
+    /** Run a genuine on-device generation and append it to the chat. Honest about unverified/native errors. */
+    fun askLocal(text: String) {
+        val t = text.trim(); if (t.isEmpty() || localBusy) return
+        val m = runnableModelOnDisk() ?: run { add("assistant", LocalLlm.offlineFallback()); return }
+        add("user", t)
+        localBusy = true
+        val holder = add("assistant", "⏳ Локальна генерація (MediaPipe)…")
+        viewModelScope.launch {
+            val out = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                if (!LocalLlm.ensureLoaded(getApplication(), m, modelMgr.fileFor(m))) return@withContext null
+                LocalLlm.generate(t)
+            }
+            val reply = out ?: "Локальна генерація не вдалася: ${LocalLlm.lastError ?: "невідома помилка"}"
+            val i = items.indexOf(holder); if (i >= 0) items[i] = holder.copy(text = reply)
+            localBusy = false
+        }
+    }
 
     fun setLanWatch(enabled: Boolean) {
         store.lanWatchEnabled = enabled

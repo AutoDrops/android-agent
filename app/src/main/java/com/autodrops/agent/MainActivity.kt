@@ -164,6 +164,10 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
             }) { Icon(if (listening) Icons.Default.MicOff else Icons.Default.Mic, "voice", tint = if (listening) Color(0xFFFFC107) else MxGreen) }
             OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("> повідомлення…", fontFamily = mono) }, maxLines = 4,
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+            if (vm.localBusy) IconButton(onClick = { vm.stopLocal() }) { Icon(Icons.Default.Stop, "stopLocal", tint = Color(0xFFFFC107)) }
+            else if (vm.localReady()) IconButton(onClick = { val q = input; input = ""; vm.askLocal(q) }) {
+                Icon(Icons.Default.OfflineBolt, "offline", tint = MxGreen)
+            }
             if (vm.busy) IconButton(onClick = { vm.stop() }) { Icon(Icons.Default.Stop, "stop", tint = MxGreen) }
             else Button(onClick = { vm.send(input); input = "" }, Modifier.padding(start = 6.dp), colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Icon(Icons.Default.Send, "send") }
         }
@@ -559,7 +563,8 @@ fun SettingsTab(vm: AgentViewModel) {
         Divider(color = MxDim)
         // ---- Local SLM: real downloadable model manager ----
         Text("Локальна модель (офлайн)", fontFamily = mono, color = MxGreen)
-        Text("Завантаж квантовану GGUF-модель у памʼять застосунку з перевіркою SHA-256. Менеджер завантаження працює реально; рушій інференсу (llama.cpp JNI) ще не вшито в цю збірку — on-device генерація в розробці, робочий резерв — OpenRouter.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        Text(if (vm.engineLinked) "✓ Рушій on-device (MediaPipe) вшито у збірку (native .so). Завантаж .task-модель → кнопка ⚡ у чаті для офлайн-відповіді. Примітка: перша генерація не перевірена на твоєму конкретному пристрої — помилки будуть показані, не приховані." else "Рушій on-device не злінкований у цій збірці.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono)
+        Text("MediaPipe .task-моделі виконуються на пристрої повністю офлайн. GGUF-записи поки лише завантажуються (llama.cpp — у розробці). Усе з перевіркою SHA-256.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
         vm.localModels.forEach { m ->
             val have = vm.isModelDownloaded(m)
             Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {

@@ -23,13 +23,20 @@ android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 7; versionName = "3.4"
+        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 8; versionName = "3.5"
         buildConfigField("String", "EMBEDDED_API_KEY", "\"${resolveEmbeddedKey()}\"")
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     buildFeatures { compose = true; buildConfig = true }
     testOptions { unitTests { isIncludeAndroidResources = true; isReturnDefaultValues = true } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
 }
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
@@ -51,6 +58,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // On-device LLM inference (real generate path). Bundles native .so; arm-only via abiFilters.
+    implementation("com.google.mediapipe:tasks-genai:0.10.24")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.12.2")
     testImplementation("androidx.test:core:1.6.1")

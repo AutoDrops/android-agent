@@ -42,10 +42,10 @@ class V34Test {
         assertEquals(1, bare.size); assertEquals("C", bare[0].first)
         assertTrue(RecipeBundle.parse("""{"recipes":[{"prompt":""}]}""").isEmpty())
     }
-    @Test fun local_llm_honest_status() {
-        assertFalse(LocalLlm.ENGINE_PRESENT)
-        assertTrue(LocalLlm.status(false).contains("не завантажено"))
-        assertTrue(LocalLlm.status(true).contains("розробці"))
+    @Test fun local_llm_engine_shipped() {
+        // v3.5: engine is now linked (MediaPipe). Status/fallback stay informative.
+        assertTrue(LocalLlm.ENGINE_PRESENT)
+        assertTrue(LocalLlm.status(false).isNotBlank())
         assertTrue(LocalLlm.offlineFallback().isNotBlank())
     }
 }

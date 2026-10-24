@@ -150,4 +150,29 @@ class ScreenshotTest {
             Text("Рушій інференсу (llama.cpp JNI) ще не вшито — резерв OpenRouter.", color = G.copy(alpha = .6f), fontFamily = mono, fontSize = 10.sp)
         }
     }
+    @Test fun localEngineV35() = paparazzi.snapshot {
+        Frame("Локальна модель · v3.5") {
+            Text("✓ Рушій on-device (MediaPipe) вшито (native .so)", color = G, fontFamily = mono, fontSize = 13.sp)
+            Text("Завантаж .task-модель → кнопка ⚡ у чаті для офлайн-відповіді.", color = G.copy(alpha=.6f), fontFamily = mono, fontSize = 10.sp)
+            Divider(color = DIM, modifier = Modifier.padding(vertical = 8.dp))
+            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                Column(Modifier.padding(10.dp)) {
+                    Text("Qwen2.5-0.5B-Instruct (MediaPipe .task, Q8)", color = G, fontFamily = mono, fontSize = 13.sp)
+                    Text("~521 МБ · SHA-256 pinned · працює офлайн на пристрої", color = G.copy(alpha=.6f), fontFamily = mono, fontSize = 10.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top=4.dp)) {
+                        Text("✓ на диску (521 МБ)", color = G, fontFamily = mono, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterVertically))
+                        Btn("Видалити")
+                    }
+                    Text("Локальна модель завантажена та готова (MediaPipe, on-device).", color = G.copy(alpha=.6f), fontFamily = mono, fontSize = 10.sp)
+                }
+            }
+            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                Column(Modifier.padding(10.dp)) {
+                    Text("SmolLM2-360M (GGUF Q4) — завантаження", color = G, fontFamily = mono, fontSize = 13.sp)
+                    Text("~270 МБ · GGUF; рушій llama.cpp ще в розробці", color = G.copy(alpha=.6f), fontFamily = mono, fontSize = 10.sp)
+                    Btn("Завантажити", Modifier.padding(top=4.dp))
+                }
+            }
+        }
+    }
 }
