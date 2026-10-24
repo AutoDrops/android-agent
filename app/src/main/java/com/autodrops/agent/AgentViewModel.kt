@@ -357,9 +357,16 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         localBusy = true
         val holder = add("assistant", "⏳ Локальна генерація (MediaPipe)…")
         viewModelScope.launch {
+            val acc = StringBuilder()
             val out = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 if (!LocalLlm.ensureLoaded(getApplication(), m, modelMgr.fileFor(m))) return@withContext null
-                LocalLlm.generate(t)
+                // v3.9: stream partial tokens into the chat bubble as they arrive (sync fallback inside).
+                LocalLlm.generateStream(t) { part ->
+                    acc.append(part)
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                        val j = items.indexOf(holder); if (j >= 0) items[j] = holder.copy(text = acc.toString())
+                    }
+                }
             }
             val reply = out ?: "Локальна генерація не вдалася: ${LocalLlm.lastError ?: "невідома помилка"}"
             val i = items.indexOf(holder); if (i >= 0) items[i] = holder.copy(text = reply)

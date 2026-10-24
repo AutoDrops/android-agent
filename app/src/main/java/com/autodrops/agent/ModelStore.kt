@@ -40,6 +40,17 @@ object ModelCatalogLocal {
             sha256 = "e608953f169aeb1bd7b9155fec2559825e08453fc209b84eda3a781ed0452fd2",
             engine = "mediapipe",
             note = "Працює офлайн на пристрої через MediaPipe. ~521 МБ."),
+        // «БЕЗ ЦЕНЗУРИ» on-device model: abliterated Gemma-2-2B-it converted to MediaPipe .task (int4, GPU backend).
+        // Source: IlyaGusev/gemma-2-2b-it-abliterated (HF), license: Google Gemma Terms (accepted by owner).
+        // HONESTY: converted locally + SHA-256 pinned, NOT run on real hardware here (no emulator/KVM in sandbox).
+        LocalModel(
+            id = "gemma2-2b-it-ablit-mp-int4",
+            name = "Gemma-2-2B-it «без цензури» (MediaPipe .task, int4)",
+            url = "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task",
+            sizeMb = 1540,
+            sha256 = "541f2434dac9633b74730af3fa0d0e7d893dc28726aba12d3d420ab179afbaa7",
+            engine = "mediapipe",
+            note = "«Без цензури» (abliterated). Офлайн через MediaPipe, int4, ~1.6 ГБ. Сконвертовано + SHA-256 закріплено, на реальному пристрої не перевірено."),
         // GGUF entries: download+verify real; llama.cpp JNI inference still pending.
         LocalModel(
             id = "qwen2.5-0.5b-instruct-q4",

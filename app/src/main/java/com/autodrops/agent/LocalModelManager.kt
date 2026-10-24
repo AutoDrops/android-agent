@@ -137,6 +137,45 @@ object LocalLlm {
         } catch (t: Throwable) { lastError = Protocols.friendlyError(t.message ?: t.javaClass.simpleName); null }
     }
 
+    /**
+     * Streaming on-device generation (v3.9). Uses MediaPipe's generateResponseAsync(prompt, ProgressListener)
+     * when available, delivering partial tokens to [onPartial] as they arrive; the full text is returned when
+     * generation finishes. Falls back to the blocking [generate] path when the async API is absent.
+     * HONESTY: like generate(), this is wired+compiled but unverified on a physical device in this sandbox.
+     */
+    fun generateStream(prompt: String, onPartial: (String) -> Unit): String? {
+        val e = engine ?: run { lastError = "Рушій не завантажено."; return null }
+        // Locate the ProgressListener interface + the async method; if missing, fall back to blocking generate.
+        val listenerCls = runCatching {
+            Class.forName("com.google.mediapipe.tasks.genai.llminference.ProgressListener")
+        }.getOrNull()
+        val asyncMethod = listenerCls?.let {
+            runCatching { e.javaClass.getMethod("generateResponseAsync", String::class.java, it) }.getOrNull()
+        }
+        if (listenerCls == null || asyncMethod == null) {
+            val full = generate(prompt) ?: return null
+            onPartial(full); return full
+        }
+        return try {
+            val sb = StringBuilder()
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val proxy = java.lang.reflect.Proxy.newProxyInstance(
+                listenerCls.classLoader, arrayOf(listenerCls)
+            ) { _, method, args ->
+                // ProgressListener<String>.run(String partialResult, boolean done)
+                if (method.name == "run" && args != null && args.size >= 2) {
+                    (args[0] as? String)?.let { part -> sb.append(part); runCatching { onPartial(part) } }
+                    if (args[1] as? Boolean == true) latch.countDown()
+                }
+                null
+            }
+            asyncMethod.invoke(e, prompt, proxy)
+            latch.await(120, java.util.concurrent.TimeUnit.SECONDS)
+            lastError = null
+            sb.toString()
+        } catch (t: Throwable) { lastError = Protocols.friendlyError(t.message ?: t.javaClass.simpleName); null }
+    }
+
     @Synchronized fun unload() {
         runCatching { (engine as? AutoCloseable)?.close() }
         engine = null; loadedModelId = null
