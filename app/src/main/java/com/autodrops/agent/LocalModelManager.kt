@@ -25,28 +25,43 @@ class LocalModelManager(private val ctx: Context) {
 
     data class Progress(val downloadedBytes: Long, val totalBytes: Long, val done: Boolean = false, val verified: Boolean = false, val error: String? = null)
 
-    /** Downloads with progress, computing SHA-256 as bytes arrive. Verifies if an expected hash is set. */
+    /**
+     * Downloads with progress, computing SHA-256 as bytes arrive. Verifies if an expected hash is set.
+     * Supports multi-part models (v3.9): each part URL is streamed in order into one file and fed through a
+     * single SHA-256, so the combined file is verified against the pinned hash. The per-download size cap is
+     * enforced on the running total, never per part.
+     */
     suspend fun download(m: LocalModel, onProgress: (Progress) -> Unit): Progress = withContext(Dispatchers.IO) {
         val tmp = File(dir(), "${m.id}.part")
         runCatching {
-            if (!m.url.startsWith("https://")) return@withContext Progress(0, 0, error = "HTTPS обовʼязковий")
-            val expectHost = m.url.toHttpUrlOrNull()?.host
-            val resp = http.newCall(Request.Builder().url(m.url).build()).execute()
-            if (!resp.isSuccessful) { resp.close(); return@withContext Progress(0, 0, error = "HTTP ${resp.code}") }
-            // block cross-host redirects (domain-swap TOFU)
-            if (expectHost != null && resp.request.url.host != expectHost) { resp.close(); return@withContext Progress(0, 0, error = "Заблоковано міжхостовий редірект") }
-            val body = resp.body ?: return@withContext Progress(0, 0, error = "empty body")
-            val total = body.contentLength()
-            if (total > (m.sizeMb + 128L) * 1_048_576L) { resp.close(); return@withContext Progress(0, total, error = "Розмір перевищує очікуваний — відхилено") }
+            val urls = m.downloadUrls()
+            if (urls.any { !it.startsWith("https://") }) return@withContext Progress(0, 0, error = "HTTPS обовʼязковий")
+            val capBytes = (m.sizeMb + 128L) * 1_048_576L
             val md = MessageDigest.getInstance("SHA-256")
-            body.byteStream().use { ins -> tmp.outputStream().use { out ->
-                val buf = ByteArray(1 shl 16); var got = 0L; var last = 0L
-                while (true) {
-                    val n = ins.read(buf); if (n < 0) break
-                    out.write(buf, 0, n); md.update(buf, 0, n); got += n
-                    if (got - last > 2_000_000) { onProgress(Progress(got, total)); last = got }
+            var got = 0L; var last = 0L; var declaredTotal = 0L
+            if (tmp.exists()) tmp.delete()
+            tmp.outputStream().use { out ->
+                for (u in urls) {
+                    val expectHost = u.toHttpUrlOrNull()?.host
+                    val resp = http.newCall(Request.Builder().url(u).build()).execute()
+                    if (!resp.isSuccessful) { resp.close(); return@withContext Progress(got, declaredTotal, error = "HTTP ${resp.code}") }
+                    // block cross-host redirects (domain-swap TOFU)
+                    if (expectHost != null && resp.request.url.host != expectHost) { resp.close(); return@withContext Progress(got, declaredTotal, error = "Заблоковано міжхостовий редірект") }
+                    val body = resp.body ?: return@withContext Progress(got, declaredTotal, error = "empty body")
+                    val partLen = body.contentLength(); if (partLen > 0) declaredTotal += partLen
+                    body.byteStream().use { ins ->
+                        val buf = ByteArray(1 shl 16)
+                        while (true) {
+                            val n = ins.read(buf); if (n < 0) break
+                            out.write(buf, 0, n); md.update(buf, 0, n); got += n
+                            if (got > capBytes) { resp.close(); return@withContext Progress(got, declaredTotal, error = "Розмір перевищує очікуваний — відхилено") }
+                            if (got - last > 2_000_000) { onProgress(Progress(got, maxOf(declaredTotal, got))); last = got }
+                        }
+                    }
+                    resp.close()
                 }
-            } }
+            }
+            val total = maxOf(declaredTotal, got)
             val hex = md.digest().joinToString("") { "%02x".format(it) }
             // If the catalog pins a hash, enforce it; otherwise record the observed hash (TOFU) and keep the file.
             if (m.sha256.isNotBlank() && !Hashing.verify(hex, m.sha256)) {

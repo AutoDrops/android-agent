@@ -16,15 +16,25 @@ data class LocalModel(
     val sizeMb: Int,
     val sha256: String,
     val engine: String = "gguf",
-    val note: String = ""
+    val note: String = "",
+    // v3.9: when non-empty, the file is downloaded as these parts (in order) and concatenated; the
+    // combined file is then verified against [sha256]. Lets us host >1GB assets as sub-1GB GitHub parts.
+    val parts: List<String> = emptyList()
 ) {
     val isRunnable: Boolean get() = engine == "mediapipe"
     fun fileName(): String = if (engine == "mediapipe") "$id.task" else "$id.gguf"
+    /** The ordered list of URLs to fetch: the multi-part list when set, otherwise the single [url]. */
+    fun downloadUrls(): List<String> = if (parts.isNotEmpty()) parts else listOf(url)
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("url", url)
         .put("sizeMb", sizeMb).put("sha256", sha256).put("engine", engine).put("note", note)
+        .put("parts", JSONArray(parts))
     companion object {
-        fun fromJson(o: JSONObject) = LocalModel(o.optString("id"), o.optString("name"), o.optString("url"),
-            o.optInt("sizeMb"), o.optString("sha256"), o.optString("engine", "gguf"), o.optString("note"))
+        fun fromJson(o: JSONObject): LocalModel {
+            val pj = o.optJSONArray("parts")
+            val pl = if (pj != null) (0 until pj.length()).map { pj.getString(it) } else emptyList()
+            return LocalModel(o.optString("id"), o.optString("name"), o.optString("url"),
+                o.optInt("sizeMb"), o.optString("sha256"), o.optString("engine", "gguf"), o.optString("note"), pl)
+        }
     }
 }
 
@@ -46,11 +56,15 @@ object ModelCatalogLocal {
         LocalModel(
             id = "gemma2-2b-it-ablit-mp-int4",
             name = "Gemma-2-2B-it «без цензури» (MediaPipe .task, int4)",
-            url = "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task",
+            url = "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task.part00",
             sizeMb = 1540,
             sha256 = "541f2434dac9633b74730af3fa0d0e7d893dc28726aba12d3d420ab179afbaa7",
             engine = "mediapipe",
-            note = "«Без цензури» (abliterated). Офлайн через MediaPipe, int4, ~1.6 ГБ. Сконвертовано + SHA-256 закріплено, на реальному пристрої не перевірено."),
+            note = "«Без цензури» (abliterated). Офлайн через MediaPipe, int4, ~1.6 ГБ (3 частини). Сконвертовано + SHA-256 закріплено, на реальному пристрої не перевірено.",
+            parts = listOf(
+                "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task.part00",
+                "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task.part01",
+                "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task.part02")),
         // GGUF entries: download+verify real; llama.cpp JNI inference still pending.
         LocalModel(
             id = "qwen2.5-0.5b-instruct-q4",
