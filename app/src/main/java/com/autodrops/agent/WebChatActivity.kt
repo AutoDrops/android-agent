@@ -25,12 +25,17 @@ class WebChatActivity : ComponentActivity() {
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
             settings.cacheMode = WebSettings.LOAD_DEFAULT
+            WebView.setWebContentsDebuggingEnabled(false)
             settings.userAgentString = settings.userAgentString.replace("; wv", "")
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
-                    val h = req?.url?.host
-                    return if (ok(h)) false else true // block navigation outside approved sign-in domains
+                    val u = req?.url
+                    val h = u?.host
+                    // Only https + approved sign-in domains; block file:, intent:, http:, and off-list hosts.
+                    return if (u?.scheme == "https" && ok(h)) false else true
                 }
             }
             webChromeClient = WebChromeClient()

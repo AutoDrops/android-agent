@@ -53,7 +53,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun newConversation() {
         convId = db.dao().insert(Conversation(title = "New chat", model = store.model, updatedAt = System.currentTimeMillis()))
-        items.clear(); history.put(0, JSONObject().put("role", "system").put("content", systemPrompt))
+        items.clear(); sessionUsage = Usage.ZERO; history.put(0, JSONObject().put("role", "system").put("content", systemPrompt))
         while (history.length() > 1) history.remove(1)
     }
 
@@ -87,6 +87,9 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     fun runReview(paths: List<String>, model: String) {
         if (store.apiKey.isBlank()) { reviewError = "Add your API key in the Models tab first."; return }
         if (paths.isEmpty()) { reviewError = "Select at least one file to review."; return }
+        val hv = Security.checkHost(store.baseUrl)
+        if (!hv.allowed) { reviewError = hv.warning ?: "Небезпечна адреса сервера."; return }
+        ModelValidation.validateSlug(model.ifBlank { store.model }, catalog.map { it.id })?.let { reviewError = it; return }
         reviewBusy = true; reviewError = null; reviewResult = ""
         viewModelScope.launch {
             try {
@@ -377,6 +380,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     fun stop() { runJob?.cancel(); busy = false }
     fun resolvePending(ok: Boolean) { pending?.result?.complete(ok); pending = null }
 
+    fun addInfo(text: String) { add("info", text) }
+
     private fun add(role: String, text: String, card: ToolCard? = null): ChatItem {
         val it = ChatItem(nextId++, role, text, card); items.add(it)
         viewModelScope.launch { db.dao().insert(MessageEntity(convId = convId, role = role, content = if (card != null) card.preview else text)) }
@@ -396,6 +401,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         if (store.apiKey.isBlank()) { add("error", "Add your API key in the Models tab to start chatting."); return }
         val hv = Security.checkHost(store.baseUrl)
         if (!hv.allowed) { add("error", hv.warning ?: "Небезпечна адреса сервера."); return }
+        ModelValidation.validateSlug(store.model, catalog.map { it.id })?.let { add("error", it); return }
         add("user", text)
         AgentPlan.clear()
         if (ragEnabled) {
@@ -429,8 +435,10 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                 var consecutiveErrors = 0
                 for (step in 1..maxSteps) {
                     val streaming = store.stream
+                    val supportsTools = catalog.firstOrNull { it.id == store.model }?.let { it.params.isEmpty() || it.params.contains("tools") } ?: true
+                    val toolSpec = if (supportsTools) reg.openAiTools() else JSONArray()
                     val streamItem = if (streaming) add("assistant", "") else null
-                    val msg = llm.complete(store.baseUrl, store.apiKey, store.model, history, reg.openAiTools(), streaming) { delta ->
+                    val msg = llm.complete(store.baseUrl, store.apiKey, store.model, history, toolSpec, streaming) { delta ->
                         streamItem?.let { it.text += delta; items[items.indexOf(it)] = it.copy(text = it.text) }
                     }
                     val usage = parseUsage(msg); msg.remove("_usage")

@@ -27,7 +27,7 @@ class LlmClient {
     suspend fun models(base: String, key: String): List<ModelInfo> = withContext(Dispatchers.IO) {
         http.newCall(req(base, key).url("$base/models").get().build()).execute().use { r ->
             val txt = r.body?.string() ?: ""
-            if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}")
+            if (!r.isSuccessful) throw RuntimeException(ModelValidation.extractError(r.code, txt))
             val arr = JSONObject(txt).getJSONArray("data")
             (0 until arr.length()).map { i ->
                 val m = arr.getJSONObject(i)
@@ -43,13 +43,15 @@ class LlmClient {
     /** Returns final assistant message JSON. onDelta receives streamed text. */
     suspend fun complete(base: String, key: String, model: String, messages: JSONArray, tools: JSONArray,
                          stream: Boolean, onDelta: (String) -> Unit): JSONObject = withContext(Dispatchers.IO) {
-        val body = JSONObject().put("model", model).put("messages", messages).put("stream", stream)
+        ModelValidation.validateMessages(messages)?.let { throw RuntimeException(it) }
+        val slug = model.trim()
+        val body = JSONObject().put("model", slug).put("messages", messages).put("stream", stream)
             .put("usage", JSONObject().put("include", true))
         if (tools.length() > 0) body.put("tools", tools).put("tool_choice", "auto")
         val call = http.newCall(req(base, key).url("$base/chat/completions")
             .post(body.toString().toRequestBody("application/json".toMediaType())).build())
         call.execute().use { r ->
-            if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}")
+            if (!r.isSuccessful) throw RuntimeException(ModelValidation.extractError(r.code, r.body?.string()))
             if (!stream) {
                 val o = JSONObject(r.body!!.string())
                 o.optJSONObject("error")?.let { throw RuntimeException(it.optString("message")) }

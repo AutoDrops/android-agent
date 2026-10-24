@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     fun askPerms() {
-        val p = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_CONTACTS)
+        val p = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_CONTACTS, Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) p += Manifest.permission.NEARBY_WIFI_DEVICES
         perms.launch(p.toTypedArray())
     }
@@ -160,7 +160,7 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
             }
             IconButton(onClick = {
                 if (listening) { vm.voice.stop(); listening = false }
-                else { listening = true; vm.startVoice(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { listening = false }) }
+                else { listening = true; vm.startVoice(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { msg -> listening = false; vm.addInfo("Мікрофон: $msg") }) }
             }) { Icon(if (listening) Icons.Default.MicOff else Icons.Default.Mic, "voice", tint = if (listening) Color(0xFFFFC107) else MxGreen) }
             OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("> повідомлення…", fontFamily = mono) }, maxLines = 4,
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
@@ -285,14 +285,24 @@ fun ToolsTab(vm: AgentViewModel, askPerms: () -> Unit) {
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
         BigButton("Додати в базу знань", { if (ragBody.isNotBlank()) { vm.addRag(ragTitle, ragBody); ragTitle = ""; ragBody = "" } }, Modifier.fillMaxWidth())
         var ingestMsg by remember { mutableStateOf("") }
+        val ingestScope = androidx.compose.runtime.rememberCoroutineScope()
         val fileIngest = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
-            if (uri != null) runCatching {
-                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
-                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
-                val text = PdfText.extractOrText(bytes, name)
-                if (text.isBlank()) ingestMsg = "Не вдалося прочитати текст із файлу." else
-                    vm.ingestText(name, text) { n -> ingestMsg = "Імпортовано «$name»: $n фрагмент(ів) у базу знань." }
-            }.onFailure { ingestMsg = "Помилка: ${it.message}" }
+            if (uri != null) {
+                ingestMsg = "Читаю файл…"
+                ingestScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+                        val max = 5 * 1024 * 1024 // 5 MB cap to avoid ANR/OOM
+                        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readNBytes(max + 1) } ?: ByteArray(0)
+                        if (bytes.size > max) throw IllegalArgumentException("Файл завеликий (>5 МБ).")
+                        val text = PdfText.extractOrText(bytes, name)
+                        if (text.isBlank()) throw IllegalArgumentException("Не вдалося прочитати текст із файлу.")
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            vm.ingestText(name, text) { n -> ingestMsg = "Імпортовано «$name»: $n фрагмент(ів) у базу знань." }
+                        }
+                    }.onFailure { e -> ingestScope.launch(kotlinx.coroutines.Dispatchers.Main) { ingestMsg = "Помилка: ${e.message}" } }
+                }
+            }
         }
         BigButton("Імпортувати файл (txt/md/pdf)", { fileIngest.launch("*/*") }, Modifier.fillMaxWidth())
         if (ingestMsg.isNotBlank()) Text(ingestMsg, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono)
