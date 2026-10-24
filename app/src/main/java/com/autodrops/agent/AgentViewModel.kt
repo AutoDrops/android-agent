@@ -43,6 +43,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         store.seedEmbeddedKeyIfNeeded()
+        runCatching { RuleScheduler.ensureScheduled(getApplication()) }
         if (history.length() == 0) history.put(JSONObject().put("role", "system").put("content", systemPrompt))
         viewModelScope.launch { newConversation() }
     }
@@ -147,6 +148,19 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     fun recipes() = db.dao().recipes()
     fun saveRecipe(name: String, prompt: String) { viewModelScope.launch { db.dao().insert(Recipe(name = name.ifBlank { prompt.take(24) }, prompt = prompt)) } }
     fun deleteRecipe(id: Long) { viewModelScope.launch { db.dao().deleteRecipe(id) } }
+
+    // ---- v3.2: local RAG, proactive rules, voice ----
+    fun ragDocs() = db.dao().ragDocsFlow()
+    fun addRag(title: String, content: String) { viewModelScope.launch {
+        db.dao().insert(RagDoc(title = title.ifBlank { content.take(24) }, content = content,
+            embedding = Embeddings.encode(Embeddings.embed("$title $content")))) } }
+    fun deleteRag(id: Long) { viewModelScope.launch { db.dao().deleteRag(id) } }
+
+    fun rules() = db.dao().rulesFlow()
+    fun addRule(r: Rule) { viewModelScope.launch { db.dao().insert(r); RuleScheduler.ensureScheduled(getApplication()) } }
+    fun deleteRule(id: Long) { viewModelScope.launch { db.dao().deleteRule(id) } }
+
+    val voice by lazy { VoiceInput(getApplication()) }
 
     fun conversations() = db.dao().conversations()
     fun startNew() { viewModelScope.launch { newConversation() } }

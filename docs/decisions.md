@@ -41,3 +41,16 @@ Consulted for the own-LAN toolkit design + one-tap model UX.
 - ACCEPTED: one-tap UX — tap a model tile = set active + navigate to Chat, no dialog; chat header shows current model and opens Models on tap.
 - REJECTED: dolphin's ARP via broadcast-datagram snippet (not how ARP works on Android without raw sockets) — used ping-sweep + /proc/net/arp MAC enrichment instead.
 - Hard limits enforced regardless of model: public IPs refused; no cracking/credential theft/MITM/exploit payloads; packet capture gated behind system VpnService consent or documented Shizuku/root.
+
+# ===== v3.2 =====
+Deferred ideas from v3 (Gemini) now implemented:
+- Local Vector RAG (#4) — SHIPPED: on-device hashing-embedding index (Embeddings.kt, 256-dim, L2-normalized, cosine), Room-persisted RagDoc, tools rag_add/rag_search/rag_list/rag_delete + Tools-tab UI. Chose a dependency-free local vectorizer over ONNX to avoid APK bloat.
+- Screen context via MediaProjection + OCR (#3/Gemini VSC) — SHIPPED: ScreenCaptureActivity (consent) + foreground ScreenCaptureService + ML Kit (play-services text-recognition, thin), tool screen_ocr (Risk.HIGH). Never captures without consent; one frame only.
+- Offline voice (#8 subset) — SHIPPED (MVP): push-to-talk mic in Chat via Android SpeechRecognizer (uk-UA). No custom wake-word (documented; would need Vosk ~50MB).
+- WorkManager proactive rules (#3 Gemini daemons / #5 GPT) — SHIPPED: Rule entity + RuleScheduler (15-min periodic) + RuleWorker. Background jobs ONLY read state and notify; run_prompt is queued for in-app confirmation, never executed in background.
+- Local SLM fallback (#6) — STUBBED (by design): downloadable-model path UI + docs; OpenRouter remains the working fallback. Avoided baking a model into the APK (kept APK 19MB).
+
+## Codex check (openai/gpt-5.3-codex, cost $0.0205)
+- ✅ Confirmed: no silent screen capture; no background autonomous tool execution; RAG fully on-device.
+- [HIGH] run_prompt content shown in notification — ACCEPTED: removed prompt text, generic "очікує підтвердження".
+- [MED] notifications could leak SSID on lock screen — ACCEPTED: VISIBILITY_PRIVATE + generic publicVersion.

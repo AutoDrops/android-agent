@@ -23,7 +23,7 @@ android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 4; versionName = "3.1"
+        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 5; versionName = "3.2"
         buildConfigField("String", "EMBEDDED_API_KEY", "\"${resolveEmbeddedKey()}\"")
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -48,6 +48,8 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("dev.mobile:dadb:1.2.10")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.12.2")
     testImplementation("androidx.test:core:1.6.1")

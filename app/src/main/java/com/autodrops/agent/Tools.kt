@@ -27,6 +27,7 @@ import kotlin.coroutines.resume
 
 /** Builds the typed tool registry. Unknown tools / invalid args fail closed; risk drives confirmation. */
 class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
+    private val db = AppDb.get(ctx)
 
     val specs: List<ToolSpec> = buildList {
         add(ToolSpec("network_info", "Current Wi-Fi connection info and local IP addresses. Optional nearby Wi-Fi scan.",
@@ -173,6 +174,35 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
                 "• Без root: Android VpnService (система показує діалог згоди на VPN; трафік іде лише через локальний tun — зовнішні пристрої не чіпаються).\n" +
                 "• З root/Shizuku: tcpdump на інтерфейсі wlan0.\n" +
                 "Для безпеки капчур вимкнено за замовчуванням і запускається лише з явної згоди в системному діалозі. Інші функції (виявлення/скан) уже доступні."
+            }))
+
+        // ---- Local RAG (on-device embeddings, persists in Room) ----
+        add(ToolSpec("rag_add", "Save a note/snippet to the local knowledge base (on-device embeddings).",
+            Schema.obj("title" to Schema.str("short title"), "content" to Schema.str("text to remember"), required = listOf("title", "content")),
+            risk = { Risk.LOW }, exec = {
+                val c = it.getString("content")
+                val id = db.dao().insert(RagDoc(title = it.getString("title"), content = c, embedding = Embeddings.encode(Embeddings.embed(it.getString("title") + " " + c))))
+                "Збережено в базу знань (id=$id)."
+            }))
+        add(ToolSpec("rag_search", "Semantic search of the local knowledge base.",
+            Schema.obj("query" to Schema.str("search query"), "top_k" to Schema.int("results, default 5", 1, 20), required = listOf("query")),
+            risk = { Risk.LOW }, exec = {
+                val hits = Embeddings.search(Embeddings.embed(it.getString("query")), db.dao().ragDocs(), it.intOr("top_k", 5))
+                if (hits.isEmpty()) "База знань порожня." else hits.joinToString("\n\n") { h -> "[${"%.2f".format(h.score)}] ${h.title} (id=${h.id})\n${h.content.take(500)}" }
+            }))
+        add(ToolSpec("rag_list", "List saved knowledge-base entries.",
+            Schema.obj(required = emptyList()), risk = { Risk.LOW }, exec = {
+                val d = db.dao().ragDocs(); if (d.isEmpty()) "Порожньо." else d.joinToString("\n") { r -> "id=${r.id} · ${r.title}" }
+            }))
+        add(ToolSpec("rag_delete", "Delete a knowledge-base entry by id.",
+            Schema.obj("id" to Schema.int("entry id"), required = listOf("id")),
+            risk = { Risk.SENSITIVE }, exec = { db.dao().deleteRag(it.getInt("id").toLong()); "Видалено id=${it.getInt("id")}." }))
+
+        // ---- Screen context via MediaProjection + OCR (user-granted capture only) ----
+        add(ToolSpec("screen_ocr", "Return text recognized from the last user-approved screen capture. Start a capture from the Tools tab (MediaProjection consent required).",
+            Schema.obj(required = emptyList()), risk = { Risk.HIGH }, exec = {
+                val t = ScreenText.last
+                if (t.isNullOrBlank()) "Немає захопленого екрана. Натисни «Захопити екран (OCR)» у вкладці Інструменти та дай системний дозвіл." else "Текст з екрана:\n" + t
             }))
     }
 

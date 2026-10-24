@@ -130,7 +130,12 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit) {
             }
         }
         if (vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MxGreen)
+        var listening by remember { mutableStateOf(false) }
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = {
+                if (listening) { vm.voice.stop(); listening = false }
+                else { listening = true; vm.voice.start(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { listening = false }) }
+            }) { Icon(if (listening) Icons.Default.MicOff else Icons.Default.Mic, "voice", tint = if (listening) Color(0xFFFFC107) else MxGreen) }
             OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("> повідомлення…", fontFamily = mono) }, maxLines = 4,
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
             if (vm.busy) IconButton(onClick = { vm.stop() }) { Icon(Icons.Default.Stop, "stop", tint = MxGreen) }
@@ -238,6 +243,26 @@ fun ToolsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         }
         Divider(color = MxDim)
         BigButton("Код-рев'ю (огляд коду)", { reviewMode = true }, Modifier.fillMaxWidth())
+        Divider(color = MxDim)
+        Divider(color = MxDim)
+        Text("База знань (локальний RAG)", fontFamily = mono, color = MxGreen)
+        var ragTitle by remember { mutableStateOf("") }
+        var ragBody by remember { mutableStateOf("") }
+        val ragDocs by vm.ragDocs().collectAsState(initial = emptyList())
+        OutlinedTextField(ragTitle, { ragTitle = it }, Modifier.fillMaxWidth(), label = { Text("Назва", fontFamily = mono) }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        OutlinedTextField(ragBody, { ragBody = it }, Modifier.fillMaxWidth().heightIn(min = 60.dp), label = { Text("Текст нотатки/файлу", fontFamily = mono) },
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        BigButton("Додати в базу знань", { if (ragBody.isNotBlank()) { vm.addRag(ragTitle, ragBody); ragTitle = ""; ragBody = "" } }, Modifier.fillMaxWidth())
+        if (ragDocs.isEmpty()) Text("Поки порожньо.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        ragDocs.take(20).forEach { d -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("• ${d.title}", Modifier.weight(1f), color = MxGreen.copy(alpha = 0.85f), fontSize = 12.sp, fontFamily = mono)
+            TextButton(onClick = { vm.deleteRag(d.id) }) { Text("✕", color = MxGreen) }
+        } }
+        Divider(color = MxDim)
+        Text("Контекст екрана (OCR)", fontFamily = mono, color = MxGreen)
+        BigButton("Захопити екран (OCR)", { ctx.startActivity(Intent(ctx, ScreenCaptureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, Modifier.fillMaxWidth())
+        Text("Система попросить дозвіл на запис екрана. Захоплюється один кадр; текст доступний інструменту screen_ocr.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
         Divider(color = MxDim)
         Text("Дозволи та доступи", fontFamily = mono, color = MxGreen)
         BigButton("Запросити runtime-дозволи", askPerms, Modifier.fillMaxWidth())
@@ -368,6 +393,33 @@ fun SettingsTab(vm: AgentViewModel) {
         Slider(vm.maxSteps.toFloat(), { vm.maxSteps = it.toInt() }, valueRange = 1f..30f, colors = SliderDefaults.colors(thumbColor = MxGreen, activeTrackColor = MxGreen))
         Divider(color = MxDim)
         Text("Безпека: ключ шифрується (Keystore), надсилається лише на HTTPS; незнайомий хост попереджає. Вивід інструментів фільтрується від секретів.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        Divider(color = MxDim)
+        Text("Проактивні правила (WorkManager)", fontFamily = mono, color = MxGreen)
+        val rules by vm.rules().collectAsState(initial = emptyList())
+        var rName by remember { mutableStateOf("") }
+        var rTrigger by remember { mutableStateOf("charging") }
+        var rParam by remember { mutableStateOf("") }
+        OutlinedTextField(rName, { rName = it }, Modifier.fillMaxWidth(), label = { Text("Назва правила", fontFamily = mono) }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("charging" to "Заряджання", "wifi_ssid" to "Wi-Fi SSID", "interval" to "Періодично").forEach { (id, lbl) ->
+                FilterChip(rTrigger == id, { rTrigger = id }, { Text(lbl, fontFamily = mono, fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MxDim, selectedLabelColor = MxGreen, labelColor = MxGreen.copy(alpha = .6f)))
+            }
+        }
+        if (rTrigger == "wifi_ssid") OutlinedTextField(rParam, { rParam = it }, Modifier.fillMaxWidth(), label = { Text("SSID містить…", fontFamily = mono) }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        BigButton("Додати правило", { if (rName.isNotBlank()) { vm.addRule(Rule(name = rName, trigger = rTrigger, param = rParam)); rName = ""; rParam = "" } }, Modifier.fillMaxWidth())
+        Text("Правила працюють раз на ~15 хв (ліміт WorkManager), лише читають стан і шлють сповіщення. Дії-запити не виконуються у фоні без підтвердження у застосунку.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        if (rules.isEmpty()) Text("Немає правил.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
+        rules.forEach { r -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("• ${r.name} [${r.trigger}${if (r.param.isNotBlank()) ":" + r.param else ""}]", Modifier.weight(1f), color = MxGreen.copy(alpha = 0.85f), fontSize = 12.sp, fontFamily = mono)
+            TextButton(onClick = { vm.deleteRule(r.id) }) { Text("✕", color = MxGreen) }
+        } }
+        Divider(color = MxDim)
+        Text("Локальна модель (офлайн-fallback)", fontFamily = mono, color = MxGreen)
+        Text("Щоб не роздувати APK, локальна SLM не вшита. Передбачено шлях завантаження квантованої моделі (GGUF/ONNX) у майбутньому; зараз офлайн-розпізнавання доступне у голосовому вводі, а робочий fallback — OpenRouter. Статус: заготовка (download-flow).", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        BigButton("Завантажити локальну модель (скоро)", { }, Modifier.fillMaxWidth(), enabled = false)
         Divider(color = MxDim)
         Text("Історія", fontFamily = mono, color = MxGreen)
         BigButton("Новий чат", { vm.startNew() })

@@ -45,3 +45,10 @@ It is **never committed** (`local.properties` and `*.apk` are gitignored) and ne
 `SecureStore` prefills `EncryptedSharedPreferences` from it on first launch only; the Models tab lets you
 replace or **clear** the key at any time (clearing disables re-seeding).
 For release builds from CI, the same key would need to be provided as a CI secret/env var — it is **not** in the repo.
+
+## v3.2 features
+- **Local RAG** (on-device embeddings, Room-persisted): tools `rag_add`/`rag_search`/`rag_list`/`rag_delete` + UI in Tools tab.
+- **Screen OCR**: user-granted MediaProjection capture → ML Kit OCR → `screen_ocr` tool (always consent, one frame, never background).
+- **Voice**: push-to-talk STT (Android SpeechRecognizer, uk-UA) in Chat. No custom wake-word (would need a bundled Vosk model).
+- **Proactive rules** (WorkManager, ~15-min period): charging / Wi-Fi SSID / interval triggers. Background jobs only read state & notify; agent actions are never run in the background without in-app confirmation.
+- **Local SLM**: downloadable-model path is stubbed to keep the APK small (~19MB); OpenRouter is the working fallback.
