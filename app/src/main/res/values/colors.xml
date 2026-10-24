@@ -1,0 +1,5 @@
+<resources>
+    <color name="matrix_bg">#FF000000</color>
+    <color name="matrix_green">#FF00FF66</color>
+    <color name="matrix_dim">#FF0A3A1A</color>
+</resources>

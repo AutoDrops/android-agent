@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">DRON.exe</string>
+    <string name="a11y_desc">Lets DRON.exe read the screen and perform taps/typing ONLY after you confirm each action in the app.</string>
+    <string name="tab_chat">Chat</string>
+    <string name="tab_models">Models</string>
+    <string name="tab_tools">Tools</string>
+    <string name="tab_code">Terminal/Code</string>
+    <string name="tab_net">Network/Devices</string>
+    <string name="tab_settings">Settings</string>
+    <string name="refresh">Refresh</string>
+</resources>

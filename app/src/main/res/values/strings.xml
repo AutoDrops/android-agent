@@ -1,4 +1,11 @@
 <resources>
-    <string name="app_name">Android Agent</string>
-    <string name="a11y_desc">Lets Android Agent read the screen and perform taps/typing ONLY after you confirm each action in the app.</string>
+    <string name="app_name">DRON.exe</string>
+    <string name="a11y_desc">Дозволяє DRON.exe читати екран і виконувати дії (натискання/введення) ЛИШЕ після вашого підтвердження у застосунку.</string>
+    <string name="tab_chat">Чат</string>
+    <string name="tab_models">Моделі</string>
+    <string name="tab_tools">Інструменти</string>
+    <string name="tab_code">Термінал/Код</string>
+    <string name="tab_net">Мережа/Пристрої</string>
+    <string name="tab_settings">Налаштування</string>
+    <string name="refresh">Оновити</string>
 </resources>
