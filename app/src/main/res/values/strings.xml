@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Android Agent</string>
+    <string name="a11y_desc">Lets Android Agent read the screen and perform taps/typing ONLY after you confirm each action in the app.</string>
+</resources>
