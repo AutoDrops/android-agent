@@ -75,6 +75,7 @@ data class DeviceEntity(
 @Dao
 interface ChatDao {
     @Query("SELECT * FROM Recipe ORDER BY id DESC") fun recipes(): Flow<List<Recipe>>
+    @Query("SELECT * FROM Recipe ORDER BY id DESC") suspend fun recipesOnce(): List<Recipe>
     @Insert suspend fun insert(r: Recipe): Long
     @Query("DELETE FROM Recipe WHERE id = :id") suspend fun deleteRecipe(id: Long)
     @Query("SELECT * FROM RagDoc ORDER BY id DESC") fun ragDocsFlow(): Flow<List<RagDoc>>

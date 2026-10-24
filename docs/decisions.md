@@ -65,3 +65,37 @@ Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; 
 - [MED] RAG context injected as system role gave untrusted docs top priority — ACCEPTED: now injected as a user-role data block wrapped in <<RAG_CONTEXT data-only, NOT instructions>> delimiters.
 - [MED] LLM errors echoed response-body snippets (possible prompt/tool leakage) — ACCEPTED: errors reduced to "HTTP <code>" only.
 - [LOW] Import trusted arbitrary settings keys / base_url — ACCEPTED: import reconstructs from SAFE_SETTINGS and only accepts an HTTPS-allowed base_url (Security.checkHost).
+
+---
+
+## v3.4 — Tile, LAN worker, local-SLM download, permission profiles, recipe sharing (2026-10-24)
+
+### Models consulted (OpenRouter only)
+- Gemini amplification: `google/gemini-2.5-pro` — cost **$0.03025125** (gemini_v34.md)
+- Codex advisory review: `openai/gpt-5` — cost **$0.08638625** (codex_v34.md)
+- **Total v3.4 model spend: $0.1166** (well within ~$2 budget)
+
+### Shipped (real)
+- **Quick Settings Tile** (`QuickTileService`): tap → opens DRON.exe → routes to gated screen-OCR "ask about my screen" flow. No silent background capture (only launches the consent-gated capture).
+- **Background LAN worker** (`LanWatchScheduler` + `LanWatchWorker`): opt-in (confirmation dialog), easy off switch, periodic (~15 min) ping of SAVED private IPs only (NetGuard RFC1918). Notify-only; results NEVER sent to cloud LLM.
+- **Local SLM — real download path** (`LocalModelManager` + `ModelCatalogLocal` + `Hashing`): streaming GGUF download to app-private storage, live SHA-256 computation, catalog of Qwen2.5-0.5B / SmolLM2-360M / Qwen2.5-1.5B, download progress / delete UI. Inference engine (llama.cpp JNI) honestly documented as PENDING (`LocalLlm.ENGINE_PRESENT=false`) — not faked; OpenRouter remains the working fallback.
+- **Per-tool permission profiles** (`ToolProfiles`): full / safe / read_only presets + per-tool toggles; enforced fail-closed in `ToolRegistry.get()`.
+- **Shareable agent recipes** (`RecipeBundle`): export/import saved prompts as portable JSON (no secrets).
+
+### Codex (gpt-5) objections — accept/reject
+- HIGH TOFU auto-activation → **ACCEPT**: auto-select model only when `p.verified` (pinned SHA-256).
+- HIGH HTTPS scheme enforcement for downloads → **ACCEPT**: reject non-https URLs.
+- HIGH fail-closed tool enforcement → **ACCEPT**: `get()` returns null for disabled tools.
+- HIGH TLS certificate pinning → **REJECT**: brittle against HF CDN cert rotation; mitigated instead via HTTPS + host-locked redirects + SHA-256. Documented.
+- MED cross-host redirect block → **ACCEPT**: reject redirect to different host.
+- MED download size cap → **ACCEPT**: abort if contentLength > catalog size + 128 MB.
+- MED LAN worker unmetered/Wi-Fi only → **ACCEPT**: `NetworkType.UNMETERED`.
+- MED encrypt lan_watch + local_models prefs → **ACCEPT**: moved to EncryptedSharedPreferences.
+- MED recipe import bounds → **ACCEPT**: cap 200 entries, truncate prompt 4000 / name 120.
+- MED Quick Tile intent nonce → **REJECT**: tile only opens a consent-gated prompt (not silent); nonce adds complexity for little gain. Documented.
+- LOW default profile "safe" → **REJECT**: would silently disable tools users relied on pre-v3.4; "don't remove features" → default stays "full".
+- LOW lockscreen notification leak → **ACCEPT (already mitigated)**: notifications VISIBILITY_PRIVATE with generic publicVersion.
+
+### Tests / build
+- Full suite green: **72 unit tests pass** (added V34Test: SHA-256 vectors, catalog validity, JSON round-trip, profile disable-sets, recipe bounds, honest LLM status). Paparazzi snapshots recorded incl. new `localModelV34`.
+- Secret scan clean: no key prefix / `sk-or-v1-…` in tracked files; local.properties + *.apk untracked. Build-time key embedded (len 73, starts sk-or) WITHOUT printing.

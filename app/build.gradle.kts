@@ -23,7 +23,7 @@ android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 6; versionName = "3.3"
+        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 7; versionName = "3.4"
         buildConfigField("String", "EMBEDDED_API_KEY", "\"${resolveEmbeddedKey()}\"")
     }
     buildFeatures { compose = true; buildConfig = true }

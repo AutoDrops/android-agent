@@ -246,7 +246,9 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
     fun openAiTools(): JSONArray = JSONArray().apply {
         specs.filter { it.name !in store.disabledTools }.forEach { put(it.toOpenAi()) }
     }
-    fun get(name: String) = byName[name]
+    fun get(name: String) = byName[name]?.takeIf { name !in store.disabledTools }  // fail-closed per permission profile
+    /** Base risk of each tool (evaluated with empty args) — used by per-tool permission profiles UI. */
+    fun toolRisks(): List<Pair<String, Risk>> = specs.map { it.name to runCatching { it.risk(JSONObject()) }.getOrDefault(Risk.SENSITIVE) }
 
     // ---- implementations ----
 

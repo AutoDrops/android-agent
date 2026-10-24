@@ -46,6 +46,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     init {
         store.seedEmbeddedKeyIfNeeded()
         runCatching { RuleScheduler.ensureScheduled(getApplication()) }
+        runCatching { if (store.lanWatchEnabled) LanWatchScheduler.enable(getApplication()) }
         if (history.length() == 0) history.put(JSONObject().put("role", "system").put("content", systemPrompt))
         viewModelScope.launch { newConversation() }
     }
@@ -191,6 +192,67 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
             .put("disabled_tools", JSONArray(store.disabledTools.toList()))
         return ExportBundle.build(settings, db.dao().ragDocs(), db.dao().enabledRules(), db.dao().devices())
     }
+    // ---- v3.4: local model manager, LAN watch, tool profiles, recipe sharing ----
+    val localModels = ModelCatalogLocal.CATALOG
+    private val modelMgr by lazy { LocalModelManager(getApplication()) }
+    var modelDownloading by mutableStateOf<String?>(null)
+    var modelProgress by mutableStateOf(0f)
+    var modelStatus by mutableStateOf("")
+    fun isModelDownloaded(m: LocalModel) = modelMgr.isDownloaded(m)
+    fun modelSizeMb(m: LocalModel) = (modelMgr.sizeOnDisk(m) / 1_048_576L).toInt()
+    fun downloadModel(m: LocalModel) {
+        if (modelDownloading != null) return
+        modelDownloading = m.id; modelProgress = 0f; modelStatus = "Завантаження ${m.name}…"
+        viewModelScope.launch {
+            val p = modelMgr.download(m) { pr -> if (pr.totalBytes > 0) modelProgress = pr.downloadedBytes.toFloat() / pr.totalBytes }
+            modelStatus = when {
+                p.error != null -> "Помилка: ${p.error}"
+                p.verified -> "Готово. SHA-256 перевірено."
+                p.done -> "Завантажено. SHA-256 зафіксовано (TOFU): ${modelMgr.observedHash(m)?.take(16)}…"
+                else -> "Завершено."
+            }
+            if (p.done && p.verified) store.selectedLocalModel = m.id
+            modelDownloading = null
+        }
+    }
+    fun deleteModel(m: LocalModel) { modelMgr.delete(m); if (store.selectedLocalModel == m.id) store.selectedLocalModel = ""; modelStatus = "Видалено ${m.name}." }
+    fun localLlmStatus(m: LocalModel) = LocalLlm.status(modelMgr.isDownloaded(m))
+
+    fun setLanWatch(enabled: Boolean) {
+        store.lanWatchEnabled = enabled
+        if (enabled) LanWatchScheduler.enable(getApplication()) else LanWatchScheduler.disable(getApplication())
+    }
+
+    fun toolRisks() = reg.toolRisks()
+    fun applyToolProfile(profile: String) {
+        store.toolProfile = profile
+        store.disabledTools = ToolProfiles.disabledFor(profile, reg.toolRisks())
+    }
+    fun toggleTool(name: String, enabled: Boolean) {
+        store.disabledTools = if (enabled) store.disabledTools - name else store.disabledTools + name
+        store.toolProfile = "custom"
+    }
+
+    suspend fun exportRecipesJson(): String = RecipeBundle.build(db.dao().recipesOnce())
+    fun importRecipesJson(json: String, onDone: (String) -> Unit) { viewModelScope.launch {
+        val r = runCatching {
+            val list = RecipeBundle.parse(json)
+            list.forEach { (n, p) -> db.dao().insert(Recipe(name = n, prompt = p)) }
+            "Імпортовано ${list.size} рецепт(ів)."
+        }.getOrElse { "Помилка імпорту рецептів: ${it.message}" }
+        onDone(r)
+    } }
+
+    /** Quick-tile flow: after a user-approved capture, wait for OCR text and prefill it for the chat. */
+    var quickPrefill by mutableStateOf<String?>(null)
+    fun awaitScreenTextThenPrefill() { viewModelScope.launch {
+        ScreenText.last = null
+        var waited = 0
+        while (ScreenText.last == null && waited < 12000) { kotlinx.coroutines.delay(400); waited += 400 }
+        val t = ScreenText.last
+        quickPrefill = if (t.isNullOrBlank()) "Опиши, що зараз на екрані." else "Ось текст з мого екрана, коротко поясни головне:\n\n" + t.take(2000)
+    } }
+
     fun importBundleJson(json: String, onDone: (String) -> Unit) { viewModelScope.launch {
         val r = runCatching {
             val p = ExportBundle.parse(json)

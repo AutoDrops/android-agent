@@ -126,4 +126,28 @@ class ScreenshotTest {
     @Test fun matrixRain() = paparazzi.snapshot {
         Surface(Modifier.fillMaxSize(), color = BG) { MatrixRain(true, Modifier.fillMaxSize()) }
     }
+    @Test fun localModelV34() = paparazzi.snapshot {
+        Frame("Налаштування · v3.4") {
+            Text("Профілі дозволів інструментів", color = G, fontFamily = mono, fontSize = 15.sp)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
+                items(listOf("Повний", "Безпечний", "Лише читання")) { c ->
+                    FilterChip(c == "Безпечний", {}, { Text(c, fontFamily = mono, fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = DIM, selectedLabelColor = G, labelColor = G.copy(alpha = .6f)))
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) { Switch(true, {}); Text("  Фоновий LAN-моніторинг (приватні IP, лише сповіщення)", color = G, fontFamily = mono, fontSize = 12.sp) }
+            Divider(color = DIM, modifier = Modifier.padding(vertical = 8.dp))
+            Text("Локальна модель (офлайн)", color = G, fontFamily = mono, fontSize = 15.sp)
+            listOf("Qwen2.5-0.5B-Instruct (Q4)" to "~400 МБ · SHA-256 перевірка", "SmolLM2-360M-Instruct (Q4)" to "~270 МБ · офлайн").forEach { (n, d) ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text(n, color = G, fontFamily = mono, fontSize = 13.sp)
+                        Text(d, color = G.copy(alpha = .6f), fontFamily = mono, fontSize = 10.sp)
+                        Btn("Завантажити", Modifier.padding(top = 4.dp))
+                    }
+                }
+            }
+            Text("Рушій інференсу (llama.cpp JNI) ще не вшито — резерв OpenRouter.", color = G.copy(alpha = .6f), fontFamily = mono, fontSize = 10.sp)
+        }
+    }
 }

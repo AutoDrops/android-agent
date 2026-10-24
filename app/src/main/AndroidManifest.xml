@@ -48,6 +48,12 @@
         </service>
         <activity android:name=".ScreenCaptureActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
         <service android:name=".ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection"/>
+        <service android:name=".QuickTileService" android:exported="true"
+            android:icon="@android:drawable/ic_menu_camera"
+            android:label="DRON екран"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter>
+        </service>
         <activity android:name=".WebChatActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden"/>
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku"
             android:multiprocess="false" android:enabled="true" android:exported="true"

@@ -41,6 +41,15 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
     var disabledTools: Set<String>
         get() = prefs.getStringSet("disabled_tools", emptySet()) ?: emptySet()
         set(v) = prefs.edit().putStringSet("disabled_tools", v).apply()
+    var toolProfile: String
+        get() = prefs.getString("tool_profile", "full") ?: "full"
+        set(v) = prefs.edit().putString("tool_profile", v).apply()
+    var lanWatchEnabled: Boolean
+        get() = prefs.getBoolean("lan_watch", false)
+        set(v) = prefs.edit().putBoolean("lan_watch", v).apply()
+    var selectedLocalModel: String
+        get() = prefs.getString("local_model_id", "") ?: ""
+        set(v) = prefs.edit().putString("local_model_id", v).apply()
 
     /** Prefill the embedded build-time key once, only if the user hasn't set/cleared one. */
     fun seedEmbeddedKeyIfNeeded() {
@@ -58,5 +67,11 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
     companion object {
         const val DEFAULT_BASE = "https://openrouter.ai/api/v1"
         const val DEFAULT_MODEL = "openai/gpt-4o-mini"
+        /** Build an EncryptedSharedPreferences with the given name (reused by LAN watch / model store). */
+        fun encrypted(ctx: Context, name: String): android.content.SharedPreferences =
+            EncryptedSharedPreferences.create(ctx, name,
+                MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
     }
 }

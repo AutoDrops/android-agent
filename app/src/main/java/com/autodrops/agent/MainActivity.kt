@@ -45,10 +45,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         runCatching { com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext) }
         val shared = if (intent?.action == Intent.ACTION_SEND) intent.getStringExtra(Intent.EXTRA_TEXT) else null
+        val tileAction = intent?.getStringExtra("tile_action")
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = MxGreen, secondary = MxGreen, background = MxBg,
                 surface = Color(0xFF07140C), onPrimary = MxBg, onSurface = MxGreen, onBackground = MxGreen)) {
-                Surface(Modifier.fillMaxSize(), color = MxBg) { Root(shared = shared) { askPerms() } }
+                Surface(Modifier.fillMaxSize(), color = MxBg) { Root(shared = shared, tileAction = tileAction) { askPerms() } }
             }
         }
     }
@@ -64,10 +65,18 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Root(vm: AgentViewModel = viewModel(), shared: String?, askPerms: () -> Unit) {
+fun Root(vm: AgentViewModel = viewModel(), shared: String?, tileAction: String? = null, askPerms: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
     var palette by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
     LaunchedEffect(shared) { if (!shared.isNullOrBlank()) { vm.send(shared); tab = 0 } }
+    LaunchedEffect(tileAction) {
+        if (tileAction == "quick_screen") {
+            tab = 0
+            ctx.startActivity(Intent(ctx, ScreenCaptureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            vm.awaitScreenTextThenPrefill()
+        }
+    }
     LaunchedEffect(Unit) { vm.loadCatalog() }
     val tabs = listOf("Чат" to Icons.Default.Chat, "Моделі" to Icons.Default.Memory, "Інструменти" to Icons.Default.Build,
         "Термінал/Код" to Icons.Default.Code, "Мережа" to Icons.Default.Wifi, "Налашт." to Icons.Default.Settings)
@@ -119,6 +128,7 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, askPerms: () -> Unit
 @Composable
 fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit) {
     var input by remember { mutableStateOf("") }
+    LaunchedEffect(vm.quickPrefill) { vm.quickPrefill?.let { input = it; vm.quickPrefill = null } }
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
             IconButton(onClick = onPalette) { Icon(Icons.Default.Menu, "palette", tint = MxGreen) }
@@ -316,6 +326,26 @@ fun ToolsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         }
         if (backupMsg.isNotBlank()) Text(backupMsg, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono)
         Divider(color = MxDim)
+        Text("Агент-рецепти (спільний доступ)", fontFamily = mono, color = MxGreen)
+        var recMsg by remember { mutableStateOf("") }
+        val recExport = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri != null) scope.launch { runCatching {
+                val json = vm.exportRecipesJson(); ctx.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                recMsg = "Рецепти експортовано (без ключів)."
+            }.onFailure { recMsg = "Помилка: ${it.message}" } }
+        }
+        val recImport = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) runCatching {
+                val json = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } ?: ""
+                vm.importRecipesJson(json) { recMsg = it }
+            }.onFailure { recMsg = "Помилка: ${it.message}" }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BigButton("Експорт рецептів", { recExport.launch("dron-recipes.json") }, Modifier.weight(1f))
+            BigButton("Імпорт рецептів", { recImport.launch("application/json") }, Modifier.weight(1f))
+        }
+        if (recMsg.isNotBlank()) Text(recMsg, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono)
+        Divider(color = MxDim)
         Text("Дозволи та доступи", fontFamily = mono, color = MxGreen)
         BigButton("Запросити runtime-дозволи", askPerms, Modifier.fillMaxWidth())
         BigButton("Accessibility (дії в UI)", { open(Settings.ACTION_ACCESSIBILITY_SETTINGS) }, Modifier.fillMaxWidth())
@@ -494,9 +524,58 @@ fun SettingsTab(vm: AgentViewModel) {
             TextButton(onClick = { vm.deleteRule(r.id) }) { Text("✕", color = MxGreen) }
         } }
         Divider(color = MxDim)
-        Text("Локальна модель (офлайн-fallback)", fontFamily = mono, color = MxGreen)
-        Text("Щоб не роздувати APK, локальна SLM не вшита. Передбачено шлях завантаження квантованої моделі (GGUF/ONNX) у майбутньому; зараз офлайн-розпізнавання доступне у голосовому вводі, а робочий fallback — OpenRouter. Статус: заготовка (download-flow).", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
-        BigButton("Завантажити локальну модель (скоро)", { }, Modifier.fillMaxWidth(), enabled = false)
+        // ---- LAN background watch ----
+        Text("Фоновий моніторинг мережі (LAN watch)", fontFamily = mono, color = MxGreen)
+        var confirmLan by remember { mutableStateOf(false) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(vm.store.lanWatchEnabled, { on -> if (on) confirmLan = true else vm.setLanWatch(false) })
+            Text("Перевіряти інвентар кожні ~15 хв і сповіщати про нові/зниклі пристрої", color = MxGreen, fontFamily = mono, fontSize = 12.sp)
+        }
+        Text("Пінгує ЛИШЕ збережені приватні IP (RFC1918). Результати НЕ надсилаються у хмарну модель — тільки локальні сповіщення.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
+        if (confirmLan) AlertDialog(onDismissRequest = { confirmLan = false }, containerColor = Color(0xFF07140C), textContentColor = MxGreen,
+            title = { Text("Увімкнути LAN-моніторинг?", fontFamily = mono, color = MxGreen) },
+            text = { Text("Фонове завдання періодично пінгуватиме твої збережені приватні IP і надсилатиме локальні сповіщення про зміни. Нічого не йде у хмару.", fontFamily = mono, fontSize = 12.sp) },
+            confirmButton = { Button(onClick = { vm.setLanWatch(true); confirmLan = false }, colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Text("Увімкнути") } },
+            dismissButton = { TextButton(onClick = { confirmLan = false }) { Text("Скасувати", color = MxGreen) } })
+        Divider(color = MxDim)
+        // ---- Per-tool permission profiles ----
+        Text("Профілі дозволів інструментів", fontFamily = mono, color = MxGreen)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ToolProfiles.PROFILES.forEach { p ->
+                FilterChip(vm.store.toolProfile == p, { vm.applyToolProfile(p) }, { Text(ToolProfiles.label(p).substringBefore(" ("), fontFamily = mono, fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MxDim, selectedLabelColor = MxGreen, labelColor = MxGreen.copy(alpha = .6f)))
+            }
+        }
+        Text("Профіль: ${ToolProfiles.label(vm.store.toolProfile)}. Вимкнені інструменти агент не може викликати (fail-closed).", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
+        var showTools by remember { mutableStateOf(false) }
+        TextButton(onClick = { showTools = !showTools }) { Text(if (showTools) "Сховати список інструментів ▴" else "Показати всі інструменти ▾", color = MxGreen, fontFamily = mono, fontSize = 12.sp) }
+        if (showTools) vm.toolRisks().forEach { (name, risk) ->
+            val enabled = name !in vm.store.disabledTools
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text(name, color = MxGreen, fontFamily = mono, fontSize = 12.sp); Text(risk.name, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono, fontSize = 9.sp) }
+                Switch(enabled, { vm.toggleTool(name, it) })
+            }
+        }
+        Divider(color = MxDim)
+        // ---- Local SLM: real downloadable model manager ----
+        Text("Локальна модель (офлайн)", fontFamily = mono, color = MxGreen)
+        Text("Завантаж квантовану GGUF-модель у памʼять застосунку з перевіркою SHA-256. Менеджер завантаження працює реально; рушій інференсу (llama.cpp JNI) ще не вшито в цю збірку — on-device генерація в розробці, робочий резерв — OpenRouter.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        vm.localModels.forEach { m ->
+            val have = vm.isModelDownloaded(m)
+            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                Column(Modifier.padding(10.dp)) {
+                    Text(m.name, color = MxGreen, fontFamily = mono, fontSize = 13.sp)
+                    Text("~${m.sizeMb} МБ · ${m.note}", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
+                    if (vm.modelDownloading == m.id) { LinearProgressIndicator(progress = vm.modelProgress, modifier = Modifier.fillMaxWidth().padding(top = 4.dp), color = MxGreen) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        if (!have) BigButton(if (vm.modelDownloading == m.id) "Завантаження…" else "Завантажити", { vm.downloadModel(m) }, enabled = vm.modelDownloading == null)
+                        else { Text("✓ на диску (${vm.modelSizeMb(m)} МБ)", color = MxGreen, fontFamily = mono, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterVertically)); TextButton(onClick = { vm.deleteModel(m) }) { Text("Видалити", color = MxGreen, fontFamily = mono, fontSize = 12.sp) } }
+                    }
+                    if (have) Text(vm.localLlmStatus(m), color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
+                }
+            }
+        }
+        if (vm.modelStatus.isNotBlank()) Text(vm.modelStatus, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp)
         Divider(color = MxDim)
         Text("Історія", fontFamily = mono, color = MxGreen)
         BigButton("Новий чат", { vm.startNew() })
