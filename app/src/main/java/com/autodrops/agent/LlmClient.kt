@@ -27,7 +27,7 @@ class LlmClient {
     suspend fun models(base: String, key: String): List<ModelInfo> = withContext(Dispatchers.IO) {
         http.newCall(req(base, key).url("$base/models").get().build()).execute().use { r ->
             val txt = r.body?.string() ?: ""
-            if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}: ${txt.take(300)}")
+            if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}")
             val arr = JSONObject(txt).getJSONArray("data")
             (0 until arr.length()).map { i ->
                 val m = arr.getJSONObject(i)
@@ -44,18 +44,22 @@ class LlmClient {
     suspend fun complete(base: String, key: String, model: String, messages: JSONArray, tools: JSONArray,
                          stream: Boolean, onDelta: (String) -> Unit): JSONObject = withContext(Dispatchers.IO) {
         val body = JSONObject().put("model", model).put("messages", messages).put("stream", stream)
+            .put("usage", JSONObject().put("include", true))
         if (tools.length() > 0) body.put("tools", tools).put("tool_choice", "auto")
         val call = http.newCall(req(base, key).url("$base/chat/completions")
             .post(body.toString().toRequestBody("application/json".toMediaType())).build())
         call.execute().use { r ->
-            if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}: ${(r.body?.string() ?: "").take(500)}")
+            if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}")
             if (!stream) {
                 val o = JSONObject(r.body!!.string())
                 o.optJSONObject("error")?.let { throw RuntimeException(it.optString("message")) }
-                return@withContext o.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+                val m = o.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+                o.optJSONObject("usage")?.let { m.put("_usage", it) }
+                return@withContext m
             }
             val content = StringBuilder()
             val calls = sortedMapOf<Int, JSONObject>()
+            var usageObj: JSONObject? = null
             val src = r.body!!.source()
             while (!src.exhausted()) {
                 coroutineContext.ensureActive()
@@ -65,6 +69,7 @@ class LlmClient {
                 if (data == "[DONE]") break
                 val o = runCatching { JSONObject(data) }.getOrNull() ?: continue
                 o.optJSONObject("error")?.let { throw RuntimeException(it.optString("message")) }
+                o.optJSONObject("usage")?.let { usageObj = it }
                 val ch = o.optJSONArray("choices")?.optJSONObject(0) ?: continue
                 val d = ch.optJSONObject("delta") ?: continue
                 val txt = d.optString("content", "")
@@ -85,6 +90,7 @@ class LlmClient {
                 }
             }
             val msg = JSONObject().put("role", "assistant").put("content", content.toString())
+            usageObj?.let { msg.put("_usage", it) }
             if (calls.isNotEmpty()) msg.put("tool_calls", JSONArray(calls.values.mapIndexed { i, c ->
                 if (c.getString("id").isEmpty()) c.put("id", "call_$i"); c }))
             msg

@@ -95,6 +95,34 @@ class ScreenshotTest {
             Text("Безпека: ключ шифрується, лише HTTPS; вивід фільтрується від секретів.", color = G.copy(alpha = .6f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
         }
     }
+    @Test fun agenticPlan() = paparazzi.snapshot {
+        Frame("DRON.exe · Агентний план") {
+            Column(Modifier.fillMaxWidth().background(Color(0xFF07140C), RoundedCornerShape(8.dp)).padding(8.dp)) {
+                Text("▸ План агента", color = G, fontFamily = mono, fontSize = 12.sp)
+                Text("✓ 1. Сканувати локальну мережу", color = G, fontFamily = mono, fontSize = 11.sp)
+                Text("⏵ 2. Додати ТВ у інвентар з міткою", color = Color(0xFFFFC107), fontFamily = mono, fontSize = 11.sp)
+                Text("• 3. Сформувати звіт", color = G.copy(alpha = .6f), fontFamily = mono, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("Увімкни ТВ у вітальні", Modifier.fillMaxWidth().background(Color(0xFF0B2A16), RoundedCornerShape(8.dp)).padding(10.dp), color = G, fontFamily = mono, fontSize = 15.sp)
+            Text("Готово. ТВ увімкнено.", Modifier.fillMaxWidth().background(Color(0xFF07140C), RoundedCornerShape(8.dp)).padding(10.dp), color = G, fontFamily = mono, fontSize = 15.sp)
+            Text("⛁ 1240→320 tok · \$0.00180", color = G.copy(alpha = .5f), fontFamily = mono, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, top = 2.dp))
+        }
+    }
+    @Test fun inventory() = paparazzi.snapshot {
+        Frame("Мережа · Інвентар") {
+            Text("Інвентар пристроїв (з мітками)", color = G, fontFamily = mono, fontSize = 13.sp)
+            listOf("Samsung TV" to "192.168.1.44  ·  a4:xx", "Sonos колонка" to "192.168.1.51", "NAS сервер" to "192.168.1.10").forEach { (lbl, ip) ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) { Text(lbl, color = G, fontFamily = mono, fontSize = 14.sp); Text(ip, color = G.copy(alpha = .6f), fontFamily = mono, fontSize = 10.sp) }
+                        Text("✕", color = G)
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp)); Btn("Зберегти пристрій", Modifier.fillMaxWidth())
+        }
+    }
     @Test fun matrixRain() = paparazzi.snapshot {
         Surface(Modifier.fillMaxSize(), color = BG) { MatrixRain(true, Modifier.fillMaxSize()) }
     }

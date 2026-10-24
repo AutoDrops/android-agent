@@ -55,6 +55,23 @@ data class Rule(
     }
 }
 
+@Entity
+data class DeviceEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val ip: String,
+    val mac: String = "",
+    val label: String = "",
+    val lastSeen: Long = System.currentTimeMillis()
+) {
+    fun toJson(): org.json.JSONObject = org.json.JSONObject()
+        .put("id", id).put("ip", ip).put("mac", mac).put("label", label).put("lastSeen", lastSeen)
+    companion object {
+        fun fromJson(o: org.json.JSONObject) = DeviceEntity(
+            id = o.optLong("id"), ip = o.optString("ip"), mac = o.optString("mac"),
+            label = o.optString("label"), lastSeen = o.optLong("lastSeen", System.currentTimeMillis()))
+    }
+}
+
 @Dao
 interface ChatDao {
     @Query("SELECT * FROM Recipe ORDER BY id DESC") fun recipes(): Flow<List<Recipe>>
@@ -68,6 +85,12 @@ interface ChatDao {
     @Query("SELECT * FROM Rule WHERE enabled = 1") suspend fun enabledRules(): List<Rule>
     @Insert suspend fun insert(r: Rule): Long
     @Query("DELETE FROM Rule WHERE id = :id") suspend fun deleteRule(id: Long)
+    @Query("SELECT * FROM DeviceEntity ORDER BY label, ip") fun devicesFlow(): Flow<List<DeviceEntity>>
+    @Query("SELECT * FROM DeviceEntity") suspend fun devices(): List<DeviceEntity>
+    @Query("SELECT * FROM DeviceEntity WHERE ip = :ip LIMIT 1") suspend fun deviceByIp(ip: String): DeviceEntity?
+    @Insert suspend fun insert(d: DeviceEntity): Long
+    @Update suspend fun update(d: DeviceEntity)
+    @Query("DELETE FROM DeviceEntity WHERE id = :id") suspend fun deleteDevice(id: Long)
     @Query("SELECT * FROM Conversation ORDER BY updatedAt DESC") fun conversations(): Flow<List<Conversation>>
     @Query("SELECT * FROM MessageEntity WHERE convId = :id ORDER BY id") suspend fun messages(id: Long): List<MessageEntity>
     @Insert suspend fun insert(c: Conversation): Long
@@ -79,7 +102,7 @@ interface ChatDao {
     @Query("DELETE FROM Conversation") suspend fun wipeConvs()
 }
 
-@Database(entities = [Conversation::class, MessageEntity::class, Recipe::class, RagDoc::class, Rule::class], version = 3, exportSchema = false)
+@Database(entities = [Conversation::class, MessageEntity::class, Recipe::class, RagDoc::class, Rule::class, DeviceEntity::class], version = 4, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun dao(): ChatDao
     companion object {

@@ -204,6 +204,42 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
                 val t = ScreenText.last
                 if (t.isNullOrBlank()) "Немає захопленого екрана. Натисни «Захопити екран (OCR)» у вкладці Інструменти та дай системний дозвіл." else "Текст з екрана:\n" + t
             }))
+
+        // ---- Agentic plan panel (visible multi-step planning) ----
+        add(ToolSpec("set_plan", "Declare a short ordered plan of steps for a complex task; it is shown to the user in a plan panel. Pass a JSON array of step strings.",
+            Schema.obj("steps" to Schema.str("JSON array of step descriptions, e.g. [\"scan LAN\",\"label TV\"]"), required = listOf("steps")),
+            risk = { Risk.LOW }, exec = {
+                val list = PlanCodec.fromStrings(it.getString("steps"))
+                if (list.isEmpty()) "План порожній або некоректний JSON-масив." else { AgentPlan.set(list); "План на ${list.size} крок(ів) показано користувачу." }
+            }))
+        add(ToolSpec("complete_step", "Mark a plan step (0-based index) as done or failed; updates the plan panel.",
+            Schema.obj("index" to Schema.int("0-based step index", 0, 99), "ok" to Schema.bool("true=done, false=failed"), required = listOf("index")),
+            risk = { Risk.LOW }, exec = {
+                AgentPlan.mark(it.getInt("index"), if (it.optBoolean("ok", true)) "done" else "failed"); "Крок ${it.getInt("index")} оновлено."
+            }))
+
+        // ---- LAN device inventory (labeled, persistent) ----
+        add(ToolSpec("inventory_add", "Save/update a local-network device in the labeled inventory (private IPs only).",
+            Schema.obj("ip" to Schema.str("device private IP"), "mac" to Schema.str("MAC (optional)"), "label" to Schema.str("friendly label (optional)"), required = listOf("ip")),
+            risk = { Risk.SENSITIVE }, preview = { "inventory_add ${it.str("ip")} ${it.str("label")}" }, exec = {
+                val ip = it.getString("ip").trim()
+                if (!NetGuard.isPrivateV4(ip)) "Відхилено: ${ip} не є приватною (RFC1918) адресою. Інвентар лише для твоєї локальної мережі." else {
+                    val existing = db.dao().deviceByIp(ip)
+                    if (existing == null) { val id = db.dao().insert(DeviceEntity(ip = ip, mac = it.str("mac"), label = it.str("label"))); "Додано пристрій id=$id ($ip)." }
+                    else { db.dao().update(existing.copy(mac = it.str("mac").ifBlank { existing.mac }, label = it.str("label").ifBlank { existing.label }, lastSeen = System.currentTimeMillis())); "Оновлено пристрій ($ip)." }
+                }
+            }))
+        add(ToolSpec("inventory_list", "List saved local-network devices with labels.",
+            Schema.obj(required = emptyList()), risk = { Risk.LOW }, exec = {
+                val d = db.dao().devices(); if (d.isEmpty()) "Інвентар порожній." else d.joinToString("\n") { x -> "${x.ip}  ${x.mac}  ${x.label}" }
+            }))
+        add(ToolSpec("inventory_label", "Set the friendly label for a saved device by IP.",
+            Schema.obj("ip" to Schema.str("device IP"), "label" to Schema.str("new label"), required = listOf("ip", "label")),
+            risk = { Risk.SENSITIVE }, preview = { "label ${it.str("ip")} = ${it.str("label")}" }, exec = {
+                val ex = db.dao().deviceByIp(it.getString("ip"))
+                if (ex == null) "Пристрій ${it.getString("ip")} не знайдено в інвентарі."
+                else { db.dao().update(ex.copy(label = it.getString("label"))); "Мітку оновлено для ${it.getString("ip")}." }
+            }))
     }
 
     private val byName = specs.associateBy { it.name }

@@ -52,3 +52,11 @@ For release builds from CI, the same key would need to be provided as a CI secre
 - **Voice**: push-to-talk STT (Android SpeechRecognizer, uk-UA) in Chat. No custom wake-word (would need a bundled Vosk model).
 - **Proactive rules** (WorkManager, ~15-min period): charging / Wi-Fi SSID / interval triggers. Background jobs only read state & notify; agent actions are never run in the background without in-app confirmation.
 - **Local SLM**: downloadable-model path is stubbed to keep the APK small (~19MB); OpenRouter is the working fallback.
+
+## v3.3 features
+- **Agentic plan panel**: the agent declares steps (`set_plan`) and marks progress (`complete_step`), shown live in chat; plus a consecutive-error retry guard.
+- **Per-message token/cost meter**: real usage from OpenRouter (with client-side price fallback), per message and per session.
+- **RAG deepened**: ingest txt/md/pdf files (chunked) into the knowledge base; a "chat with my notes" toggle injects relevant notes as clearly-labeled untrusted data.
+- **LAN device inventory**: labeled, persistent device list (private IPs only) via UI and `inventory_add`/`inventory_list`/`inventory_label` tools.
+- **Backup**: export/import RAG + rules + device inventory + non-secret settings to JSON. The API key and approved hosts are never exported.
+- **QoL**: command palette, expandable/copyable error cards.

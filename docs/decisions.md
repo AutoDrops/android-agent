@@ -54,3 +54,14 @@ Deferred ideas from v3 (Gemini) now implemented:
 - ✅ Confirmed: no silent screen capture; no background autonomous tool execution; RAG fully on-device.
 - [HIGH] run_prompt content shown in notification — ACCEPTED: removed prompt text, generic "очікує підтвердження".
 - [MED] notifications could leak SSID on lock screen — ACCEPTED: VISIBILITY_PRIVATE + generic publicVersion.
+
+# ===== v3.3 =====
+## Gemini idea pass (google/gemini-2.5-pro, cost $0.0317)
+Accepted & shipped: (1) visible multi-step plan panel (set_plan/complete_step tools + PlanPanel), (2) RAG file ingestion txt/md/pdf (GetContent + pdfbox-android + Chunking), (3) per-message token/cost meter (OpenRouter usage.include + client-side estimate fallback), (4) agentic retry (consecutive-error cap, model self-corrects on tool errors), (5) LAN device inventory + labels (DeviceEntity + inventory_* tools + Network UI), (6) settings/RAG export-import (ExportBundle, SAF, NO secrets), (7) enhanced expandable error cards + copy, (8) "chat with notes" toggle (RagContext injection), (9) command palette (AlertDialog filter).
+Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; kept the existing one-tap Tools capture instead to limit scope); background scheduled LAN scan as a Worker (inventory tools + existing WorkManager rules cover it without a new always-on scanner).
+
+## Codex security review (openai/gpt-5.3-codex, cost $0.0309) — advisory, features kept
+- [HIGH] Export could leak api_key/approved_hosts if caller passed them — ACCEPTED: ExportBundle.build now enforces a SAFE_SETTINGS allowlist (safe()); parse() reconstructs settings from the allowlist only.
+- [MED] RAG context injected as system role gave untrusted docs top priority — ACCEPTED: now injected as a user-role data block wrapped in <<RAG_CONTEXT data-only, NOT instructions>> delimiters.
+- [MED] LLM errors echoed response-body snippets (possible prompt/tool leakage) — ACCEPTED: errors reduced to "HTTP <code>" only.
+- [LOW] Import trusted arbitrary settings keys / base_url — ACCEPTED: import reconstructs from SAFE_SETTINGS and only accepts an HTTPS-allowed base_url (Security.checkHost).

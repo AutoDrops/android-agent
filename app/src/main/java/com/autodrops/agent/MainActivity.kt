@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 
 private val MxGreen = Color(0xFF00FF66)
 private val MxDim = Color(0xFF0A3A1A)
@@ -41,6 +43,7 @@ class MainActivity : ComponentActivity() {
     private val perms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        runCatching { com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext) }
         val shared = if (intent?.action == Intent.ACTION_SEND) intent.getStringExtra(Intent.EXTRA_TEXT) else null
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = MxGreen, secondary = MxGreen, background = MxBg,
@@ -63,6 +66,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun Root(vm: AgentViewModel = viewModel(), shared: String?, askPerms: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
+    var palette by remember { mutableStateOf(false) }
     LaunchedEffect(shared) { if (!shared.isNullOrBlank()) { vm.send(shared); tab = 0 } }
     LaunchedEffect(Unit) { vm.loadCatalog() }
     val tabs = listOf("Чат" to Icons.Default.Chat, "Моделі" to Icons.Default.Memory, "Інструменти" to Icons.Default.Build,
@@ -81,12 +85,13 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, askPerms: () -> Unit
         }) { pad ->
             Box(Modifier.padding(pad)) {
                 when (tab) {
-                    0 -> ChatTab(vm) { tab = 1 }; 1 -> ModelsTab(vm) { tab = 0 }; 2 -> ToolsTab(vm, askPerms)
+                    0 -> ChatTab(vm, onOpenModels = { tab = 1 }, onPalette = { palette = true }); 1 -> ModelsTab(vm) { tab = 0 }; 2 -> ToolsTab(vm, askPerms)
                     3 -> DevTab(vm); 4 -> NetworkTab(vm); else -> SettingsTab(vm)
                 }
             }
         }
     }
+    if (palette) CommandPalette(vm, onDismiss = { palette = false }, onNav = { tab = it; palette = false })
     vm.pending?.let { p ->
         AlertDialog(onDismissRequest = {}, containerColor = Color(0xFF07140C), titleContentColor = MxGreen, textContentColor = MxGreen,
             icon = { Icon(Icons.Default.Warning, null, tint = MxGreen) },
@@ -112,26 +117,37 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, askPerms: () -> Unit
 @Composable fun Head(t: String) = Text(t, color = MxGreen, fontFamily = mono, fontSize = 20.sp, modifier = Modifier.padding(vertical = 6.dp))
 
 @Composable
-fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit) {
+fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit) {
     var input by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onOpenModels() }.padding(8.dp)) {
-            Text("DRON.exe", color = MxGreen, fontFamily = mono, fontSize = 18.sp)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+            IconButton(onClick = onPalette) { Icon(Icons.Default.Menu, "palette", tint = MxGreen) }
+            Text("DRON.exe", Modifier.clickable { onOpenModels() }, color = MxGreen, fontFamily = mono, fontSize = 18.sp)
             Spacer(Modifier.weight(1f))
-            Text("▾ ${vm.store.model.substringAfterLast('/')}", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp)
+            if (vm.sessionUsage.totalTokens > 0) Text(vm.sessionUsage.label(), color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp, modifier = Modifier.padding(end = 6.dp))
+            Text("▾ ${vm.store.model.substringAfterLast('/')}", Modifier.clickable { onOpenModels() }, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp)
         }
+        PlanPanel()
         if (vm.items.isEmpty()) Box(Modifier.weight(1f)) { Empty("> Запитай агента: переглянь телефон, скануй мережу, знайди ТВ або напиши й запусти код.") }
         else LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), reverseLayout = true) {
             items(vm.items.reversed(), key = { it.id }) { m ->
-                if (m.card != null) ToolCardView(m.card) else {
-                    val bg = when (m.role) { "user" -> Color(0xFF0B2A16); "error" -> Color(0xFF3A0E0E); "info" -> Color(0xFF2A2A0E); else -> Color(0xFF07140C) }
-                    SelectionContainer { Text(m.text.ifBlank { "…" }, Modifier.fillMaxWidth().background(bg, RoundedCornerShape(8.dp)).padding(10.dp), fontSize = 15.sp, color = MxGreen, fontFamily = mono) }
+                if (m.card != null) ToolCardView(m.card)
+                else if (m.role == "error") ErrorCard(m.text)
+                else {
+                    val bg = when (m.role) { "user" -> Color(0xFF0B2A16); "info" -> Color(0xFF2A2A0E); else -> Color(0xFF07140C) }
+                    Column {
+                        SelectionContainer { Text(m.text.ifBlank { "…" }, Modifier.fillMaxWidth().background(bg, RoundedCornerShape(8.dp)).padding(10.dp), fontSize = 15.sp, color = MxGreen, fontFamily = mono) }
+                        m.usage?.let { Text(it.label(), color = MxGreen.copy(alpha = 0.5f), fontFamily = mono, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, top = 2.dp)) }
+                    }
                 }
             }
         }
         if (vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MxGreen)
         var listening by remember { mutableStateOf(false) }
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconToggleButton(checked = vm.ragEnabled, onCheckedChange = { vm.ragEnabled = it }) {
+                Icon(Icons.Default.MenuBook, "chat with notes", tint = if (vm.ragEnabled) Color(0xFFFFC107) else MxGreen.copy(alpha = 0.6f))
+            }
             IconButton(onClick = {
                 if (listening) { vm.voice.stop(); listening = false }
                 else { listening = true; vm.voice.start(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { listening = false }) }
@@ -254,6 +270,18 @@ fun ToolsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         OutlinedTextField(ragBody, { ragBody = it }, Modifier.fillMaxWidth().heightIn(min = 60.dp), label = { Text("Текст нотатки/файлу", fontFamily = mono) },
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
         BigButton("Додати в базу знань", { if (ragBody.isNotBlank()) { vm.addRag(ragTitle, ragBody); ragTitle = ""; ragBody = "" } }, Modifier.fillMaxWidth())
+        var ingestMsg by remember { mutableStateOf("") }
+        val fileIngest = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) runCatching {
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+                val text = PdfText.extractOrText(bytes, name)
+                if (text.isBlank()) ingestMsg = "Не вдалося прочитати текст із файлу." else
+                    vm.ingestText(name, text) { n -> ingestMsg = "Імпортовано «$name»: $n фрагмент(ів) у базу знань." }
+            }.onFailure { ingestMsg = "Помилка: ${it.message}" }
+        }
+        BigButton("Імпортувати файл (txt/md/pdf)", { fileIngest.launch("*/*") }, Modifier.fillMaxWidth())
+        if (ingestMsg.isNotBlank()) Text(ingestMsg, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono)
         if (ragDocs.isEmpty()) Text("Поки порожньо.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
         ragDocs.take(20).forEach { d -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("• ${d.title}", Modifier.weight(1f), color = MxGreen.copy(alpha = 0.85f), fontSize = 12.sp, fontFamily = mono)
@@ -263,6 +291,30 @@ fun ToolsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Text("Контекст екрана (OCR)", fontFamily = mono, color = MxGreen)
         BigButton("Захопити екран (OCR)", { ctx.startActivity(Intent(ctx, ScreenCaptureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, Modifier.fillMaxWidth())
         Text("Система попросить дозвіл на запис екрана. Захоплюється один кадр; текст доступний інструменту screen_ocr.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        Divider(color = MxDim)
+        Text("Резервна копія (без ключів)", fontFamily = mono, color = MxGreen)
+        var backupMsg by remember { mutableStateOf("") }
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        val exporter = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri != null) scope.launch {
+                runCatching {
+                    val json = vm.exportBundleJson()
+                    ctx.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                    backupMsg = "Експортовано базу знань, правила та пристрої (ключ НЕ включено)."
+                }.onFailure { backupMsg = "Помилка експорту: ${it.message}" }
+            }
+        }
+        val importer = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) runCatching {
+                val json = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } ?: ""
+                vm.importBundleJson(json) { backupMsg = it }
+            }.onFailure { backupMsg = "Помилка імпорту: ${it.message}" }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BigButton("Експорт", { exporter.launch("dron-backup.json") }, Modifier.weight(1f))
+            BigButton("Імпорт", { importer.launch("application/json") }, Modifier.weight(1f))
+        }
+        if (backupMsg.isNotBlank()) Text(backupMsg, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono)
         Divider(color = MxDim)
         Text("Дозволи та доступи", fontFamily = mono, color = MxGreen)
         BigButton("Запросити runtime-дозволи", askPerms, Modifier.fillMaxWidth())
@@ -357,6 +409,31 @@ fun NetworkTab(vm: AgentViewModel) {
         BigButton("Звіт безпеки мережі", { vm.send("Запусти security_report і поясни результати простими словами.") }, Modifier.fillMaxWidth())
         BigButton("Інфо Wi-Fi + локальні IP", { vm.send("Покажи network_info зі скануванням Wi-Fi.") }, Modifier.fillMaxWidth())
         Divider(color = MxDim)
+        Text("Інвентар пристроїв (збережені, з мітками)", fontFamily = mono, color = MxGreen)
+        val devices by vm.devices().collectAsState(initial = emptyList())
+        var dip by remember { mutableStateOf("") }
+        var dlabel by remember { mutableStateOf("") }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(dip, { dip = it }, Modifier.weight(1f), label = { Text("IP (приватний)", fontFamily = mono) }, singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+            OutlinedTextField(dlabel, { dlabel = it }, Modifier.weight(1f), label = { Text("Мітка", fontFamily = mono) }, singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        }
+        BigButton("Зберегти пристрій", {
+            if (NetGuard.isPrivateV4(dip.trim())) { vm.saveDevice(dip.trim(), label = dlabel.trim()); dip = ""; dlabel = "" }
+        }, Modifier.fillMaxWidth())
+        Text("Приймаються лише приватні адреси (RFC1918). Агент теж може наповнювати інвентар через inventory_add.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
+        if (devices.isEmpty()) Text("Інвентар порожній.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
+        devices.forEach { d -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (d.label.isBlank()) d.ip else "${d.label}", color = MxGreen, fontFamily = mono, fontSize = 14.sp)
+                    Text("${d.ip}${if (d.mac.isNotBlank()) "  ·  " + d.mac else ""}", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
+                }
+                TextButton(onClick = { vm.deleteDevice(d.id) }) { Text("✕", color = MxGreen) }
+            }
+        } }
+        Divider(color = MxDim)
         Text("Пульт Android TV (ADB по мережі)", fontFamily = mono, color = MxGreen)
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
             BigButton("▲", { vm.send("На Android TV, який я знайшов, надішли клавішу DPAD_UP через adbtv.") }, Modifier.width(90.dp))
@@ -433,4 +510,68 @@ private fun runCommandFor(path: String): String = when {
     path.endsWith(".js") -> "node \"${path.substringAfterLast('/')}\""
     path.endsWith(".sh") -> "sh \"${path.substringAfterLast('/')}\""
     else -> "cat \"${path.substringAfterLast('/')}\""
+}
+
+@Composable
+fun PlanPanel() {
+    val steps = AgentPlan.steps
+    if (steps.isEmpty()) return
+    Column(Modifier.fillMaxWidth().background(Color(0xFF07140C), RoundedCornerShape(8.dp)).padding(8.dp)) {
+        Text("▸ План агента", color = MxGreen, fontFamily = mono, fontSize = 12.sp)
+        steps.forEachIndexed { i, st ->
+            val mark = when (st.status) { "done" -> "✓"; "running" -> "⏵"; "failed" -> "✗"; else -> "•" }
+            val c = when (st.status) { "done" -> MxGreen; "failed" -> Color(0xFFFF6E6E); "running" -> Color(0xFFFFC107); else -> MxGreen.copy(alpha = 0.6f) }
+            Text("$mark ${i + 1}. ${st.text}", color = c, fontFamily = mono, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+fun ErrorCard(text: String) {
+    var open by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    Column(Modifier.fillMaxWidth().background(Color(0xFF3A0E0E), RoundedCornerShape(8.dp)).clickable { open = !open }.padding(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Warning, null, tint = Color(0xFFFF6E6E), modifier = Modifier.size(16.dp))
+            Text("  ${text.lineSequence().firstOrNull() ?: "Помилка"}", color = Color(0xFFFF9E9E), fontFamily = mono, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(if (open) "▴" else "▾", color = MxGreen)
+        }
+        if (open) {
+            SelectionContainer { Text(text, color = MxGreen.copy(alpha = 0.85f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)) }
+            TextButton(onClick = {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("error", text))
+            }) { Text("Копіювати", color = MxGreen, fontFamily = mono, fontSize = 12.sp) }
+        }
+    }
+}
+
+@Composable
+fun CommandPalette(vm: AgentViewModel, onDismiss: () -> Unit, onNav: (Int) -> Unit) {
+    var q by remember { mutableStateOf("") }
+    val actions = listOf<Pair<String, () -> Unit>>(
+        "Новий чат" to { vm.startNew(); onNav(0) },
+        "Відкрити моделі" to { onNav(1) },
+        "Інструменти" to { onNav(2) },
+        "Термінал / Код" to { onNav(3) },
+        "Мережа / Пристрої" to { onNav(4) },
+        "Налаштування" to { onNav(5) },
+        "Сканувати LAN" to { vm.send("Запусти lan_scan і додай знайдені пристрої в інвентар через inventory_add."); onNav(0) },
+        "Знайти пристрої (mDNS+SSDP)" to { vm.send("Знайди пристрої в локальній мережі та запропонуй зберегти їх у інвентар."); onNav(0) },
+        "Звіт безпеки мережі" to { vm.send("Запусти security_report і поясни результати."); onNav(0) },
+        "Увімкнути «чат з нотатками»" to { vm.ragEnabled = true; onNav(0) },
+    )
+    val filtered = actions.filter { it.first.contains(q, true) }
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Color(0xFF07140C), textContentColor = MxGreen,
+        title = { Text("Командна палітра", fontFamily = mono, color = MxGreen) },
+        text = { Column {
+            OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("фільтр…", fontFamily = mono) },
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+            LazyColumn(Modifier.heightIn(max = 300.dp)) {
+                items(filtered) { (label, act) ->
+                    Text(label, Modifier.fillMaxWidth().clickable { act() }.padding(vertical = 10.dp), color = MxGreen, fontFamily = mono, fontSize = 14.sp)
+                }
+            }
+        } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Закрити", color = MxGreen) } })
 }
