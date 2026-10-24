@@ -36,3 +36,12 @@ avoids bundling a proot rootfs.
 Requires JDK 17 and the Android SDK (platform 34, build-tools 34).
 
 *MVP — not all tools tested on a physical device. Direct Wi-Fi/Bluetooth toggles open system panels on Android 10+.*
+
+## Build-time OpenRouter key (v3.1)
+The debug APK is built locally with an embedded first-run OpenRouter key so the app works on first launch.
+The key is read at build time from the `OPENROUTER_API_KEY` environment variable, or from
+`openrouter.api.key` in the **gitignored** `local.properties`, and injected as `BuildConfig.EMBEDDED_API_KEY`.
+It is **never committed** (`local.properties` and `*.apk` are gitignored) and never printed.
+`SecureStore` prefills `EncryptedSharedPreferences` from it on first launch only; the Models tab lets you
+replace or **clear** the key at any time (clearing disables re-seeding).
+For release builds from CI, the same key would need to be provided as a CI secret/env var — it is **not** in the repo.

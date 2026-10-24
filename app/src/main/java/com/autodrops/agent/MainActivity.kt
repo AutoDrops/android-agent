@@ -81,7 +81,7 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, askPerms: () -> Unit
         }) { pad ->
             Box(Modifier.padding(pad)) {
                 when (tab) {
-                    0 -> ChatTab(vm); 1 -> ModelsTab(vm); 2 -> ToolsTab(vm, askPerms)
+                    0 -> ChatTab(vm) { tab = 1 }; 1 -> ModelsTab(vm) { tab = 0 }; 2 -> ToolsTab(vm, askPerms)
                     3 -> DevTab(vm); 4 -> NetworkTab(vm); else -> SettingsTab(vm)
                 }
             }
@@ -112,10 +112,14 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, askPerms: () -> Unit
 @Composable fun Head(t: String) = Text(t, color = MxGreen, fontFamily = mono, fontSize = 20.sp, modifier = Modifier.padding(vertical = 6.dp))
 
 @Composable
-fun ChatTab(vm: AgentViewModel) {
+fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit) {
     var input by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Text("DRON.exe", color = MxGreen, fontFamily = mono, fontSize = 18.sp, modifier = Modifier.weight(1f).padding(8.dp)) }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onOpenModels() }.padding(8.dp)) {
+            Text("DRON.exe", color = MxGreen, fontFamily = mono, fontSize = 18.sp)
+            Spacer(Modifier.weight(1f))
+            Text("▾ ${vm.store.model.substringAfterLast('/')}", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp)
+        }
         if (vm.items.isEmpty()) Box(Modifier.weight(1f)) { Empty("> Запитай агента: переглянь телефон, скануй мережу, знайди ТВ або напиши й запусти код.") }
         else LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), reverseLayout = true) {
             items(vm.items.reversed(), key = { it.id }) { m ->
@@ -149,7 +153,7 @@ fun ToolCardView(card: ToolCard) {
 }
 
 @Composable
-fun ModelsTab(vm: AgentViewModel) {
+fun ModelsTab(vm: AgentViewModel, onPicked: () -> Unit) {
     var key by remember { mutableStateOf("") }
     var base by remember { mutableStateOf(vm.store.baseUrl) }
     var cat by remember { mutableStateOf("top") }
@@ -168,6 +172,11 @@ fun ModelsTab(vm: AgentViewModel) {
             BigButton("Зберегти", { if (key.isNotBlank()) vm.store.apiKey = key; vm.store.baseUrl = base.ifBlank { SecureStore.DEFAULT_BASE }; vm.loadModels() })
             BigButton(stringRes(vm, "Оновити"), { vm.loadCatalog(forceLive = true) })
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (vm.store.apiKey.isNotBlank()) Text("Ключ: збережено ✓", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono, modifier = Modifier.align(Alignment.CenterVertically))
+            else Text("Ключ: відсутній", fontSize = 11.sp, color = Color(0xFFFFC107), fontFamily = mono, modifier = Modifier.align(Alignment.CenterVertically))
+            TextButton(onClick = { vm.store.clearApiKey(); key = "" }) { Text("Очистити ключ", color = MxGreen, fontFamily = mono, fontSize = 12.sp) }
+        }
         Text("Поточна: ${vm.store.model}", fontSize = 12.sp, color = MxGreen, fontFamily = mono)
         if (vm.catalogBusy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MxGreen)
         // category chips
@@ -179,14 +188,18 @@ fun ModelsTab(vm: AgentViewModel) {
         if (list.isEmpty()) Box(Modifier.weight(1f)) { Empty("Немає моделей у цій категорії. Натисни «Оновити».") }
         else LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(list, key = { it.id }) { m ->
-                Card(Modifier.fillMaxWidth().clickable { expanded = if (expanded == m.id) null else m.id },
+                // One tap: set active model and go to Chat. Long-press (info ▸) toggles the full description.
+                Card(Modifier.fillMaxWidth().clickable { vm.store.model = m.id; onPicked() },
                     colors = CardDefaults.cardColors(containerColor = if (m.id == vm.store.model) Color(0xFF0B2A16) else Color(0xFF07140C))) {
-                    Column(Modifier.padding(10.dp)) {
-                        Text(m.id, fontSize = 13.sp, color = MxGreen, fontFamily = mono)
-                        if (expanded == m.id) {
-                            Text(ModelCatalog.describeUa(m), fontSize = 12.sp, color = MxGreen.copy(alpha = 0.85f), fontFamily = mono, modifier = Modifier.padding(top = 6.dp))
-                            BigButton("Обрати цю модель", { vm.store.model = m.id }, Modifier.padding(top = 6.dp))
-                        } else Text("ctx ${m.ctx} · in ${m.inPrice} · out ${m.outPrice}", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+                    Column(Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(m.id, Modifier.weight(1f), fontSize = 16.sp, color = MxGreen, fontFamily = mono)
+                            TextButton(onClick = { expanded = if (expanded == m.id) null else m.id }) { Text(if (expanded == m.id) "▴" else "ℹ", color = MxGreen) }
+                        }
+                        Text("ctx ${m.ctx} · in ${m.inPrice} · out ${m.outPrice}", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+                        if (expanded == m.id) Text(ModelCatalog.describeUa(m), fontSize = 12.sp, color = MxGreen.copy(alpha = 0.85f), fontFamily = mono, modifier = Modifier.padding(top = 6.dp))
+                        if (m.id == vm.store.model) Text("● активна — тап, щоб відкрити чат", fontSize = 11.sp, color = MxGreen, fontFamily = mono, modifier = Modifier.padding(top = 4.dp))
+                        else Text("Тап = обрати і перейти в чат", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }

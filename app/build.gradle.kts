@@ -1,3 +1,17 @@
+import java.util.Properties
+
+// Build-time OpenRouter key: env OPENROUTER_API_KEY, else local.properties `openrouter.api.key`.
+// NEVER committed (local.properties + *.apk are gitignored). Empty string if absent.
+fun resolveEmbeddedKey(): String {
+    System.getenv("OPENROUTER_API_KEY")?.takeIf { it.isNotBlank() }?.let { return it }
+    val lp = rootProject.file("local.properties")
+    if (lp.exists()) {
+        val p = Properties(); lp.inputStream().use { p.load(it) }
+        p.getProperty("openrouter.api.key")?.takeIf { it.isNotBlank() }?.let { return it }
+    }
+    return ""
+}
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -8,7 +22,10 @@ plugins {
 android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
-    defaultConfig { applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 3; versionName = "3.0" }
+    defaultConfig {
+        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 4; versionName = "3.1"
+        buildConfigField("String", "EMBEDDED_API_KEY", "\"${resolveEmbeddedKey()}\"")
+    }
     buildFeatures { compose = true; buildConfig = true }
     testOptions { unitTests { isIncludeAndroidResources = true; isReturnDefaultValues = true } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

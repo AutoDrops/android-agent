@@ -5,12 +5,14 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 /** Settings in EncryptedSharedPreferences (AES-256-GCM; master key lives in Android Keystore). Key is never logged. */
-class SecureStore(ctx: Context) {
-    private val prefs = EncryptedSharedPreferences.create(
-        ctx, "secure_settings",
-        MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+class SecureStore internal constructor(private val prefs: android.content.SharedPreferences) {
+    constructor(ctx: Context) : this(
+        EncryptedSharedPreferences.create(
+            ctx, "secure_settings",
+            MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
     )
     var apiKey: String
         get() = prefs.getString("api_key", "") ?: ""
@@ -39,6 +41,16 @@ class SecureStore(ctx: Context) {
     var disabledTools: Set<String>
         get() = prefs.getStringSet("disabled_tools", emptySet()) ?: emptySet()
         set(v) = prefs.edit().putStringSet("disabled_tools", v).apply()
+
+    /** Prefill the embedded build-time key once, only if the user hasn't set/cleared one. */
+    fun seedEmbeddedKeyIfNeeded() {
+        if (prefs.getBoolean("key_seeded", false)) return
+        val embedded = BuildConfig.EMBEDDED_API_KEY
+        if (apiKey.isBlank() && embedded.isNotBlank()) apiKey = embedded
+        prefs.edit().putBoolean("key_seeded", true).apply()
+    }
+    /** User action: clear the stored key (and remember not to re-seed). */
+    fun clearApiKey() { prefs.edit().remove("api_key").putBoolean("key_seeded", true).apply() }
 
     /** Refuse to send the key over plaintext HTTP. */
     fun baseUrlIsSafe() = Security.checkHost(baseUrl).allowed

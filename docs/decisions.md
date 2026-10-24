@@ -30,3 +30,14 @@ Policy: accept security points on keys/user data. If a reviewer wants to BAN a c
 - [HIGH] web_fetch SSRF to localhost/private/LAN — ACCEPTED: blocks loopback/site-local/link-local/any-local targets (LAN work stays in the dedicated, confirmed network tools).
 - [HIGH] autoApproveSession auto-allows SENSITIVE tools — REVIEWED, KEPT with mitigation: it is an explicit, user-initiated per-session opt-in (unchecked by default), never applies to EFFECT/HIGH/ELEVATED, and the checkbox is hidden for ELEVATED. This is the user's own gate, consistent with the "gate, don't remove" policy. Not auto-enabled.
 - [HIGH] Unrestricted WebView redirects — ACCEPTED (same fix as navigation block above).
+
+# ===== v3.1 =====
+
+## Low-censorship design model: cognitivecomputations/dolphin-mistral-24b-venice-edition  (cost $0.00196)
+Consulted for the own-LAN toolkit design + one-tap model UX.
+- ACCEPTED: pure-JVM socket implementations (Socket/DatagramSocket/SSLSocket/InetAddress) instead of shelling out — portable, no root for most tools.
+- ACCEPTED: RFC1918 + current-/24 guard (adapted into pure, testable NetGuard.isPrivateV4 / ensureLocal; also covers loopback & link-local).
+- ACCEPTED (adjusted): risk levels. Dolphin marked scans LOW; OVERRODE to EFFECT for net_discover/ping_sweep/tcp_scan/udp_scan/open_services and HIGH for packet_capture, so every scan/capture requires in-app confirmation (per task hard rule). Lookups (dns/reverse) LOW; traceroute/whois/ssl_cert/banner SENSITIVE.
+- ACCEPTED: one-tap UX — tap a model tile = set active + navigate to Chat, no dialog; chat header shows current model and opens Models on tap.
+- REJECTED: dolphin's ARP via broadcast-datagram snippet (not how ARP works on Android without raw sockets) — used ping-sweep + /proc/net/arp MAC enrichment instead.
+- Hard limits enforced regardless of model: public IPs refused; no cracking/credential theft/MITM/exploit payloads; packet capture gated behind system VpnService consent or documented Shizuku/root.

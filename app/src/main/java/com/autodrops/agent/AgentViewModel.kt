@@ -42,6 +42,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     """.trimIndent()
 
     init {
+        store.seedEmbeddedKeyIfNeeded()
         if (history.length() == 0) history.put(JSONObject().put("role", "system").put("content", systemPrompt))
         viewModelScope.launch { newConversation() }
     }

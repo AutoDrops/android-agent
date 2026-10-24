@@ -130,6 +130,50 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
         add(ToolSpec("web_fetch", "Fetch a public web page and return its readable text (headless, on-device).",
             Schema.obj("url" to Schema.str("http(s) URL"), required = listOf("url")),
             risk = { Risk.SENSITIVE }, exec = { webFetch(it.getString("url")) }))
+
+        // ---- Own-LAN defensive toolkit (RFC1918 / current-subnet only; public IPs refused) ----
+        val defPorts = "21,22,23,25,53,80,139,443,445,554,1900,3389,5555,8008,8009,8080,8443"
+        fun guard(h: String, sub: Boolean) = NetGuard.ensureLocal(h, Lan.localIpv4(), sub)
+        fun ports(a: JSONObject) = a.str("ports").ifBlank { defPorts }.split(",").mapNotNull { it.trim().toIntOrNull() }.take(64)
+
+        add(ToolSpec("net_discover", "Discover live hosts on YOUR current local subnet (ping sweep + ARP/MAC + names). Own network only.",
+            Schema.obj(required = emptyList()), risk = { Risk.EFFECT }, exec = { Lan.hostDiscovery() }))
+        add(ToolSpec("ping_sweep", "Ping sweep of YOUR current local subnet to list reachable hosts.",
+            Schema.obj(required = emptyList()), risk = { Risk.EFFECT }, exec = { Lan.pingSweep() }))
+        add(ToolSpec("tcp_scan", "TCP port scan of ONE host on your local/private subnet. Public IPs are refused.",
+            Schema.obj("host" to Schema.str("IP/host on your LAN"), "ports" to Schema.str("Comma-separated ports"), required = listOf("host")),
+            risk = { Risk.EFFECT }, exec = { guard(it.getString("host"), true) ?: Lan.tcpScan(it.getString("host"), ports(it)) }))
+        add(ToolSpec("udp_scan", "UDP port probe of ONE host on your local/private subnet. Public IPs are refused.",
+            Schema.obj("host" to Schema.str("IP/host on your LAN"), "ports" to Schema.str("Comma-separated ports"), required = listOf("host")),
+            risk = { Risk.EFFECT }, exec = { guard(it.getString("host"), true) ?: Lan.udpScan(it.getString("host"), ports(it)) }))
+        add(ToolSpec("banner_grab", "Read the service banner on ONE open port of a local/private host (read-only, no payloads).",
+            Schema.obj("host" to Schema.str("IP/host on your LAN"), "port" to Schema.int("Port", 1, 65535), required = listOf("host", "port")),
+            risk = { Risk.SENSITIVE }, exec = { guard(it.getString("host"), true) ?: Lan.bannerGrab(it.getString("host"), it.getInt("port")) }))
+        add(ToolSpec("open_services", "Summarize open common services on ONE local/private host.",
+            Schema.obj("host" to Schema.str("IP/host on your LAN"), required = listOf("host")),
+            risk = { Risk.EFFECT }, exec = { guard(it.getString("host"), true) ?: Lan.openServices(it.getString("host")) }))
+        add(ToolSpec("dns_lookup", "Resolve a hostname to IP address(es).",
+            Schema.obj("host" to Schema.str("hostname"), required = listOf("host")),
+            risk = { Risk.LOW }, exec = { Lan.dnsLookup(it.getString("host")) }))
+        add(ToolSpec("reverse_dns", "Reverse-resolve an IP to a hostname.",
+            Schema.obj("ip" to Schema.str("IP address"), required = listOf("ip")),
+            risk = { Risk.LOW }, exec = { Lan.reverseDns(it.getString("ip")) }))
+        add(ToolSpec("traceroute", "Trace the route / reachability to a host (read-only).",
+            Schema.obj("host" to Schema.str("hostname or IP"), required = listOf("host")),
+            risk = { Risk.SENSITIVE }, exec = { Lan.traceroute(it.getString("host")) }))
+        add(ToolSpec("whois", "WHOIS lookup for a domain.",
+            Schema.obj("domain" to Schema.str("domain name"), required = listOf("domain")),
+            risk = { Risk.SENSITIVE }, exec = { Lan.whois(it.getString("domain")) }))
+        add(ToolSpec("ssl_cert_info", "Read the TLS certificate details presented by a host:port (read-only).",
+            Schema.obj("host" to Schema.str("hostname or IP"), "port" to Schema.int("TLS port, default 443", 1, 65535), required = listOf("host")),
+            risk = { Risk.SENSITIVE }, exec = { Lan.sslCert(it.getString("host"), it.intOr("port", 443)) }))
+        add(ToolSpec("packet_capture", "Local packet capture status/instructions. Capture needs VpnService consent (no root) or Shizuku/root.",
+            Schema.obj(required = emptyList()), risk = { Risk.HIGH }, exec = {
+                "Локальний перехоплювач пакетів потребує окремого дозволу:\n" +
+                "• Без root: Android VpnService (система показує діалог згоди на VPN; трафік іде лише через локальний tun — зовнішні пристрої не чіпаються).\n" +
+                "• З root/Shizuku: tcpdump на інтерфейсі wlan0.\n" +
+                "Для безпеки капчур вимкнено за замовчуванням і запускається лише з явної згоди в системному діалозі. Інші функції (виявлення/скан) уже доступні."
+            }))
     }
 
     private val byName = specs.associateBy { it.name }
