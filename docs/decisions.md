@@ -147,3 +147,43 @@ Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; 
 ### Tests / build / size
 - Full suite green (Robolectric + Paparazzi). Secret scan clean; build-time key embedded (len 73, sk-or) without printing.
 - **APK size: ~48MB** (v3.4 ~29MB → +~19MB) due to MediaPipe native engine for 2 ABIs. Noted per request; arm-only abiFilters used to avoid +28MB of x86 libs.
+
+---
+
+## v3.6 — Vosk offline voice (download path) + on-device self-check + Gemini/Codex round
+
+### Model ids & cost
+- Gemini ideas: **google/gemini-2.5-pro** — $0.04992875 (gemini_v36.md / usage_gemini_v36_usage.json)
+- Codex review: **openai/gpt-5** — $0.07415875 (codex_v36.md / usage_codex_v36_usage.json)
+- **Total v3.6 model spend: $0.1240875** (budget ~$2)
+
+### Shipped
+- **Vosk offline voice as a download-on-demand path** (`com.alphacephei:vosk-android:0.3.70`). Native `libvosk.so` + JNA `libjnidispatch.so` bundled (arm64 + v7a, arm-only abiFilters). Models are **NOT bundled**: `VoskManager` downloads+verifies+extracts on demand. Push-to-talk uses **Vosk when a model is installed+enabled**, else falls back to the system `SpeechRecognizer`. Engine label surfaced in Settings.
+  - Curated models (download-only), **SHA-256 pinned**: uk small ~138 MB (ee05b6a8…), ru small ~45 MB (961d5ff9…), en-US small ~40 MB (30f26242…).
+- **Honest on-device self-check** (Settings → «Самодіагностика рушія»): reports engine linked (MediaPipe), compatible `.task` model on disk, and runs a **real tiny smoke-generate on the device** (never faked — surfaces the genuine output or the native error). Also reports Vosk readiness.
+- **llama.cpp GGUF path decision:** NOT added. Documented in-app + here: Google maintains a working native MediaPipe LLM Inference engine with a real `generate()`; self-built llama.cpp JNI is not reproducible in this sandbox, so GGUF stays a documented plan, not fake generation. MediaPipe `.task` is the chosen on-device path.
+- No features cut: shell, net scan, TV/ADB, Accessibility, browser-login, model catalog all intact.
+
+### Codex (gpt-5) objections — accept/reject
+- HIGH no SHA-256 verify of Vosk zips → **ACCEPT**: pinned 64-hex SHA-256 per model; verified via `DigestInputStream` before extraction; download refused if hash absent/mismatch.
+- HIGH zip-bomb / unbounded size → **ACCEPT**: download byte cap (sizeMb*2 MiB), decompressed cap (sizeMb*6 MiB), entry cap (50k); abort on exceed.
+- HIGH online-fallback without consent → **ACCEPT (toggle)**: added **«Строгий офлайн»** switch — when on, never falls back to system STT (no audio off-device); engine label shows which recognizer is active.
+- HIGH cert pinning → **REJECT**: brittle vs CDN cert rotation; SHA-256 artifact pinning used as the integrity defense (same rationale as model manager).
+- MED zip-slip → **ACCEPT (kept)**: canonical-path guard retained.
+- MED atomic/partial-extract corruption (also Gemini) → **ACCEPT**: extract to `.tmp` stage dir then swap into place; try/catch cleans tmp+stage+dest on any failure.
+- MED mic permission SecurityException → **ACCEPT**: `createSpeechRecognizer`/`startListening` wrapped; routed to friendly onError, no crash.
+- MED redirect followed before host check → **PARTIAL/KEEP**: post-response same-host check kept; SHA-256 pin makes a hostile redirect's payload unusable (REJECT full followRedirects(false) rework as redundant given pinning).
+- MED symlink entries in zip → **DEFER (documented)**: canonical-path check + SHA-256 pin on a trusted, hash-verified artifact cover the realistic risk; no symlink creation observed in these models.
+- LOW system STT language hard-coded uk-UA → **ACCEPT**: language derived from selected Vosk model lang (uk-UA/ru-RU/en-US).
+- LOW release-build embedded-key guard / key hygiene → **KEEP**: embedded key stays gitignored build-time only; verified present(73, sk-or) without printing; secret-scan clean.
+
+### Gemini (gemini-2.5-pro) ideas — adopt/defer
+- Show active voice engine label → **ADOPT** (Settings voice section + self-check).
+- Download integrity checksum → **ADOPT** (SHA-256, see above).
+- Atomic extract to tmp + rename → **ADOPT**.
+- Self-check performance timing, proactive download dialog on mic tap, larger/accurate models, VAD auto-stop → **DEFER** (feasible next; kept scope tight this release).
+
+### Tests / build / size
+- Full suite green (Robolectric + Paparazzi re-recorded; matrixRain is a randomized animation). New `V36Test`: Vosk catalog uk/ru/en + HTTPS + 64-hex SHA-256 pins, dirName sanitization (no `..`/`/`), not-installed-by-default, Vosk classes bundled, HTTP/unpinned download blocked, self-check never fakes generation.
+- Secret scan clean; build-time key embedded (len 73, sk-or) without printing.
+- **APK size: ~67 MB** (v3.5 ~48 MB → **+~19 MB** from Vosk native libs for 2 ABIs). Vosk *models* add nothing to the APK (download-only). Noted per request.

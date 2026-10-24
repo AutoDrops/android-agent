@@ -160,7 +160,7 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
             }
             IconButton(onClick = {
                 if (listening) { vm.voice.stop(); listening = false }
-                else { listening = true; vm.voice.start(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { listening = false }) }
+                else { listening = true; vm.startVoice(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { listening = false }) }
             }) { Icon(if (listening) Icons.Default.MicOff else Icons.Default.Mic, "voice", tint = if (listening) Color(0xFFFFC107) else MxGreen) }
             OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("> повідомлення…", fontFamily = mono) }, maxLines = 4,
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
@@ -581,6 +581,42 @@ fun SettingsTab(vm: AgentViewModel) {
             }
         }
         if (vm.modelStatus.isNotBlank()) Text(vm.modelStatus, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp)
+        // ---- v3.6: honest on-device self-check ----
+        BigButton(if (vm.selfCheckBusy) "Діагностика…" else "Самодіагностика рушія (on-device)", { vm.runSelfCheck() }, enabled = !vm.selfCheckBusy)
+        if (vm.selfCheckReport.isNotBlank()) Text(vm.selfCheckReport, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono, fontSize = 10.sp)
+        Text("Чому MediaPipe .task: Google підтримує готовий native-рушій (LLM Inference) з робочим generate() на Android. Самостійна крос-компіляція llama.cpp JNI у цьому середовищі не відтворювана, тож GGUF-шлях лишається документованим планом, а не фейковою генерацією.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
+        Divider(color = MxDim)
+        // ---- v3.6: Vosk offline voice (download on demand, not bundled) ----
+        Text("Офлайн-голос (Vosk)", fontFamily = mono, color = MxGreen)
+        Text("Завантаж модель Vosk на вимогу — у APK вона не вшита. Push-to-talk використовує Vosk офлайн, коли модель є; інакше — системний розпізнавач. Активний: ${vm.voiceEngineLabel()}.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(vm.voskEnabled(), { vm.setVoskEnabled(it) })
+            Text(if (vm.voskEnabled()) "Vosk увімкнено" else "Vosk вимкнено (системний STT)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(vm.voskStrict(), { vm.setVoskStrict(it) })
+            Text("Строгий офлайн (не передавати аудіо системному розпізнавачу)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
+        }
+        vm.voskModels.forEach { m ->
+            val have = vm.voskInstalled(m)
+            val sel = vm.voskSelected() == m.id
+            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                Column(Modifier.padding(10.dp)) {
+                    Text((if (sel) "● " else "○ ") + m.name, color = MxGreen, fontFamily = mono, fontSize = 13.sp)
+                    Text("~${m.sizeMb} МБ · ${m.note}", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
+                    if (vm.voskDownloading == m.id) LinearProgressIndicator(progress = vm.voskProgress, modifier = Modifier.fillMaxWidth().padding(top = 4.dp), color = MxGreen)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        if (!have) BigButton(if (vm.voskDownloading == m.id) "Завантаження…" else "Завантажити", { vm.downloadVosk(m) }, enabled = vm.voskDownloading == null)
+                        else {
+                            Text("✓ на диску", color = MxGreen, fontFamily = mono, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterVertically))
+                            if (!sel) TextButton(onClick = { vm.selectVosk(m.id) }) { Text("Обрати", color = MxGreen, fontFamily = mono, fontSize = 12.sp) }
+                            TextButton(onClick = { vm.deleteVosk(m) }) { Text("Видалити", color = MxGreen, fontFamily = mono, fontSize = 12.sp) }
+                        }
+                    }
+                }
+            }
+        }
+        if (vm.voskStatus.isNotBlank()) Text(vm.voskStatus, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp)
         Divider(color = MxDim)
         Text("Історія", fontFamily = mono, color = MxGreen)
         BigButton("Новий чат", { vm.startNew() })

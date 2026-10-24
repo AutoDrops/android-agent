@@ -235,7 +235,65 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         am.isLowRamDevice
     }.getOrDefault(false)
     fun stopLocal() { localJob?.cancel(); LocalLlm.unload(); localBusy = false }
-    override fun onCleared() { super.onCleared(); runCatching { LocalLlm.unload() } }
+    override fun onCleared() { super.onCleared(); runCatching { LocalLlm.unload() }; runCatching { voice.stop() } }
+
+    // ---- v3.6: Vosk offline voice ----
+    val voskModels = VoskCatalog.CATALOG
+    private val voskMgr by lazy { VoskManager(getApplication()) }
+    var voskDownloading by mutableStateOf<String?>(null)
+    var voskProgress by mutableStateOf(0f)
+    var voskStatus by mutableStateOf("")
+    fun voskInstalled(m: VoskModel) = voskMgr.isInstalled(m)
+    fun voskEnabled() = store.voskEnabled
+    fun setVoskEnabled(on: Boolean) { store.voskEnabled = on }
+    fun voskStrict() = store.voskStrict
+    fun setVoskStrict(on: Boolean) { store.voskStrict = on }
+    fun voskSelected() = store.voskModelId
+    fun selectVosk(id: String) { store.voskModelId = id }
+    fun downloadVosk(m: VoskModel) {
+        if (voskDownloading != null) return
+        voskDownloading = m.id; voskProgress = 0f; voskStatus = "Завантаження ${m.name}…"
+        viewModelScope.launch {
+            val p = voskMgr.download(m) { pr -> if (pr.total > 0) voskProgress = pr.bytes.toFloat() / pr.total }
+            voskStatus = p.error?.let { "Помилка: $it" } ?: if (p.done) { store.voskModelId = m.id; "Готово: ${m.name} встановлено (офлайн-голос)." } else "Завершено."
+            voskDownloading = null
+        }
+    }
+    fun deleteVosk(m: VoskModel) { voskMgr.delete(m); voskStatus = "Видалено ${m.name}." }
+    /** Start push-to-talk: Vosk offline if a model is enabled+installed, else system recognizer. */
+    fun startVoice(onPartial: (String) -> Unit, onFinal: (String) -> Unit, onError: (String) -> Unit) =
+        voice.start(store, voskMgr, onPartial, onFinal, onError)
+    fun voiceEngineLabel(): String = if (voice.voskAvailable(store, voskMgr)) "Vosk (офлайн)" else "Системний розпізнавач"
+
+    // ---- v3.6: honest on-device inference self-check ----
+    var selfCheckBusy by mutableStateOf(false)
+    var selfCheckReport by mutableStateOf("")
+    fun runSelfCheck() {
+        if (selfCheckBusy) return
+        selfCheckBusy = true
+        selfCheckReport = "Запуск самодіагностики…"
+        viewModelScope.launch {
+            val sb = StringBuilder()
+            sb.appendLine("Рушій злінкований: " + if (LocalLlm.ENGINE_LINKED) "так (MediaPipe)" else "ні")
+            val m = runnableModelOnDisk()
+            sb.appendLine("Сумісна .task-модель на диску: " + (m?.name ?: "немає"))
+            if (LocalLlm.ENGINE_LINKED && m != null) {
+                sb.appendLine("Пробна генерація…")
+                val out = kotlinx.coroutines.withContext(llmDispatcher) {
+                    if (!LocalLlm.ensureLoaded(getApplication(), m, modelMgr.fileFor(m))) return@withContext null
+                    LocalLlm.generate("Відповідь одним словом: OK")
+                }
+                sb.appendLine(if (out != null) "Результат: " + out.take(200)
+                    else "Генерація не вдалася: " + (LocalLlm.lastError ?: "невідома помилка"))
+                sb.appendLine("(Це справжній виклик рушія на цьому пристрої — результат не підроблено.)")
+            } else {
+                sb.appendLine("Пробну генерацію пропущено (немає рушія або моделі).")
+            }
+            sb.appendLine("Vosk офлайн-голос: " + if (voice.voskAvailable(store, voskMgr)) "готово" else "немає моделі/вимкнено")
+            selfCheckReport = sb.toString().trim()
+            selfCheckBusy = false
+        }
+    }
     /** The runnable (.task) model currently on disk, if any. */
     fun runnableModelOnDisk(): LocalModel? = ModelCatalogLocal.runnable().firstOrNull { modelMgr.isDownloaded(it) }
     fun localReady(): Boolean = engineLinked && runnableModelOnDisk() != null

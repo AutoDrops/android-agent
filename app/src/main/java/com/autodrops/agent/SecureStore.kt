@@ -50,6 +50,16 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
     var selectedLocalModel: String
         get() = prefs.getString("local_model_id", "") ?: ""
         set(v) = prefs.edit().putString("local_model_id", v).apply()
+    var voskEnabled: Boolean
+        get() = prefs.getBoolean("vosk_enabled", false)
+        set(v) = prefs.edit().putBoolean("vosk_enabled", v).apply()
+    var voskModelId: String
+        get() = prefs.getString("vosk_model_id", "small-uk") ?: "small-uk"
+        set(v) = prefs.edit().putString("vosk_model_id", v).apply()
+    /** When true, never fall back to the (possibly online) system recognizer. */
+    var voskStrict: Boolean
+        get() = prefs.getBoolean("vosk_strict", false)
+        set(v) = prefs.edit().putBoolean("vosk_strict", v).apply()
 
     /** Prefill the embedded build-time key once, only if the user hasn't set/cleared one. */
     fun seedEmbeddedKeyIfNeeded() {

@@ -23,7 +23,7 @@ android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 8; versionName = "3.5"
+        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 9; versionName = "3.6"
         buildConfigField("String", "EMBEDDED_API_KEY", "\"${resolveEmbeddedKey()}\"")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -60,6 +60,8 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // On-device LLM inference (real generate path). Bundles native .so; arm-only via abiFilters.
     implementation("com.google.mediapipe:tasks-genai:0.10.24")
+    // Offline speech-to-text (downloadable models, not bundled). Native .so via arm-only abiFilters.
+    implementation("com.alphacephei:vosk-android:0.3.70")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.12.2")
     testImplementation("androidx.test:core:1.6.1")
