@@ -16,7 +16,7 @@ object Protocols {
 
     fun parseSsdpResponse(resp: String): SsdpResponse? {
         val firstLine = resp.lineSequence().firstOrNull()?.trim().orEmpty()
-        if (!firstLine.startsWith("HTTP/1.1") && !firstLine.startsWith("NOTIFY")) return null
+        if (!firstLine.startsWith("HTTP/1.") && !firstLine.startsWith("NOTIFY")) return null
         return SsdpResponse(header(resp, "LOCATION"), header(resp, "ST") ?: header(resp, "NT"),
             header(resp, "USN"), header(resp, "SERVER"))
     }

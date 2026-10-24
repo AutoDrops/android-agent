@@ -158,7 +158,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                     for (i in 0 until calls.length()) {
                         val c = calls.getJSONObject(i); val fn = c.getJSONObject("function")
                         val name = fn.getString("name"); val argStr = fn.optString("arguments", "{}")
-                        val spec = reg.get(name)
+                        val spec = if (name in store.disabledTools) null else reg.get(name)
                         val card = ToolCard(name, "", "running")
                         val item = add("tool", "", card)
                         fun update(s: String, o: String = card.output) { card.status = s; card.output = o; val idx = items.indexOf(item); if (idx >= 0) items[idx] = item.copy(card = card.copy(status = s, output = o)) }
@@ -170,7 +170,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                             if (err != null) { result = "Invalid arguments: $err" }
                             else {
                                 val risk = spec.risk(args)
-                                val needConfirm = risk != Risk.LOW && !(autoApproveSession && risk != Risk.ELEVATED)
+                                val autoOk = autoApproveSession && (risk == Risk.SENSITIVE)
+                                val needConfirm = risk != Risk.LOW && !autoOk
                                 card.preview = runCatching { spec.preview(args) }.getOrDefault(argStr)
                                 update("running")
                                 val allowed = if (needConfirm) {
@@ -188,7 +189,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: kotlinx.coroutines.CancellationException) { add("info", "Stopped.") }
             catch (e: Exception) { add("error", Protocols.friendlyError(e.message)) }
-            finally { busy = false; db.dao().touch(convId, items.firstOrNull { it.role == "user" }?.text?.take(40) ?: "Chat") }
+            finally { busy = false; pending?.result?.complete(false); pending = null; db.dao().touch(convId, items.firstOrNull { it.role == "user" }?.text?.take(40) ?: "Chat") }
         }
     }
 }

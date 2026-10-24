@@ -33,6 +33,13 @@ class ProtocolsTest {
         assertNull(Protocols.parseSsdpResponse("random udp noise"))
     }
 
+
+    @Test fun parseSsdpAcceptsHttp10AndMixedCase() {
+        val r = Protocols.parseSsdpResponse("HTTP/1.0 200 OK\r\nlocation: http://h/d.xml\r\nSt: upnp:rootdevice\r\n\r\n")!!
+        assertEquals("http://h/d.xml", r.location)
+        assertEquals("upnp:rootdevice", r.st)
+    }
+
     // ---------- UPnP device description ----------
     @Test fun parseDeviceDescriptionAndServices() {
         val xml = """
@@ -203,6 +210,6 @@ class ProtocolsTest {
         assertTrue(Protocols.friendlyError("HTTP 429 Too Many").contains("Rate limited"))
         assertTrue(Protocols.friendlyError("java.net.UnknownHostException: openrouter.ai").contains("Network"))
         assertTrue(Protocols.friendlyError("402 insufficient credits").contains("credits"))
-        assertFalse(Protocols.friendlyError("sk-or-v1-secret leaked").contains("sk-or-v1-secret").not() && false) // sanity
+        assertTrue(Protocols.friendlyError("boom").startsWith("Something went wrong"))
     }
 }

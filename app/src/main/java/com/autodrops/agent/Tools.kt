@@ -65,7 +65,7 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
                 "host" to Schema.str("TV IP"), "port" to Schema.int("ADB port, default 5555"),
                 "key" to Schema.str("Key e.g. DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT, DPAD_CENTER, HOME, BACK, VOLUME_UP, VOLUME_DOWN"),
                 "command" to Schema.str("Shell command or package to launch"), required = listOf("action", "host")),
-            risk = { Risk.EFFECT }, exec = { adbTv(it) }))
+            risk = { if (it.str("action") == "shell") Risk.ELEVATED else Risk.EFFECT }, exec = { adbTv(it) }))
 
         add(ToolSpec("toggle_settings", "Change or open a device setting: wifi, bluetooth, brightness, volume, dnd, flashlight.",
             Schema.obj("setting" to Schema.str("Setting", listOf("wifi", "bluetooth", "brightness", "volume", "dnd", "flashlight")),
@@ -203,7 +203,7 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
                         if (!Protocols.isValidKey(key)) return@use "Unknown key '$key'"
                         db.shell("input keyevent KEYCODE_${Protocols.normalizeKey(key)}").output
                     }
-                    "launch" -> db.shell("monkey -p ${a.getString("command")} -c android.intent.category.LAUNCHER 1").output
+                    "launch" -> { val pkg = a.getString("command"); if (!Regex("^[A-Za-z][A-Za-z0-9_.]+$").matches(pkg)) return@use "Invalid package name"; db.shell("monkey -p $pkg -c android.intent.category.LAUNCHER 1").output }
                     "shell" -> db.shell(a.getString("command")).output
                     else -> "unknown action"
                 }.ifBlank { "ok" }
@@ -250,7 +250,7 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
     private fun safe(path: String): File? {
         val ws = Exec.workspace(ctx)
         val f = File(ws, path).canonicalFile
-        return if (f.path.startsWith(ws.canonicalPath)) f else null
+        return if (f.path == ws.canonicalPath || f.path.startsWith(ws.canonicalPath + File.separator)) f else null
     }
     private fun fileOp(a: JSONObject): String {
         val f = safe(a.getString("path")) ?: return "path escapes workspace"

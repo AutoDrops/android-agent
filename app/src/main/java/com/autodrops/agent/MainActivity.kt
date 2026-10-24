@@ -150,7 +150,7 @@ fun DevTab(vm: AgentViewModel) {
                 Text(selected!!, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Color(0xFF80CBC4))
                 if (dirty) Text("●", color = Color(0xFFFFB74D))
                 TextButton(onClick = { vm.writeFile(selected!!, content); dirty = false }) { Text("Save") }
-                TextButton(onClick = { vm.runTerminal("cd \"$(dirname ${selected})\"; " + runCommandFor(selected!!), true) { term = it } }) { Text("Run") }
+                TextButton(onClick = { vm.runTerminal(runCommandFor(selected!!), true) { term = it } }) { Text("Run") }
             }
             OutlinedTextField(content, { content = it; dirty = true }, Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 240.dp),
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp), singleLine = false,
