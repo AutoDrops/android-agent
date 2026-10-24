@@ -60,6 +60,10 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
     var voskStrict: Boolean
         get() = prefs.getBoolean("vosk_strict", false)
         set(v) = prefs.edit().putBoolean("vosk_strict", v).apply()
+    /** Saved terminal snippets as a JSON array of {name,cmd}. */
+    var snippetsJson: String
+        get() = prefs.getString("snippets_json", "[]") ?: "[]"
+        set(v) = prefs.edit().putString("snippets_json", v).apply()
 
     /** Prefill the embedded build-time key once, only if the user hasn't set/cleared one. */
     fun seedEmbeddedKeyIfNeeded() {

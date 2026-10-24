@@ -110,20 +110,62 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Workspace terminal ----
     var termBusy by mutableStateOf(false)
+    var lastExitCode by mutableStateOf<Int?>(null)
+    private var termJob: kotlinx.coroutines.Job? = null
+    @Volatile private var userStopRequested = false
+    /** Parse the "exit=N" header Exec prepends, for a UI badge. */
+    private fun parseExit(out: String): Int? =
+        Regex("^exit=(-?\\d+)").find(out.trimStart())?.groupValues?.get(1)?.toIntOrNull()
     fun runTerminal(cmd: String, echoToChat: Boolean = true, onResult: (String) -> Unit) {
-        if (cmd.isBlank()) return
-        termBusy = true
-        viewModelScope.launch {
-            val out = runCatching { Exec.run(getApplication(), cmd, 30, store.shellMode) }
-                .getOrElse { "Error: " + Protocols.friendlyError(it.message) }
-            onResult(out)
-            if (echoToChat) {
-                val card = ToolCard("terminal", "$ $cmd", "done", out.take(8000))
-                items.add(ChatItem(nextId++, "tool", "", card))
-                db.dao().insert(MessageEntity(convId = convId, role = "tool", content = "$ $cmd\n$out".take(4000)))
+        if (cmd.isBlank() || termBusy) return
+        termBusy = true; lastExitCode = null; userStopRequested = false
+        termJob = viewModelScope.launch {
+            try {
+                val out = try {
+                    Exec.run(getApplication(), cmd, 30, store.shellMode)
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    // Only soft-handle a user-initiated Stop; rethrow genuine structured cancellation.
+                    if (!userStopRequested) throw ce
+                    "exit=-1 (зупинено користувачем)"
+                } catch (e: Exception) {
+                    "Error: " + Protocols.friendlyError(e.message)
+                }
+                lastExitCode = parseExit(out)
+                onResult(out)
+                if (echoToChat) {
+                    val card = ToolCard("terminal", "$ $cmd", "done", out.take(8000))
+                    items.add(ChatItem(nextId++, "tool", "", card))
+                    db.dao().insert(MessageEntity(convId = convId, role = "tool", content = "$ $cmd\n$out".take(4000)))
+                }
+            } finally {
+                termBusy = false
             }
-            termBusy = false
         }
+    }
+    /** Request a user Stop: flag it, cancel the job. termBusy is cleared by the job's finally. */
+    fun stopTerminal() { userStopRequested = true; termJob?.cancel() }
+
+    // ---- Terminal snippets (named, saved commands) ----
+    fun snippets(): List<Pair<String, String>> = runCatching {
+        val arr = org.json.JSONArray(store.snippetsJson)
+        (0 until arr.length()).map { val o = arr.getJSONObject(it); o.getString("name") to o.getString("cmd") }
+    }.getOrDefault(emptyList())
+    /** Returns true if a command string looks like it embeds a secret we should not persist. */
+    fun snippetLooksSecret(cmd: String): Boolean =
+        Regex("(?i)(sk-[a-z]|bearer\\s|api[_-]?key|password|passwd|-p\\s*\\S|token=|secret|AKIA[0-9A-Z]{8})").containsMatchIn(cmd)
+    fun saveSnippet(name: String, cmd: String): Boolean {
+        if (snippetLooksSecret(cmd)) return false
+        val n = name.trim(); val c = cmd.trim(); if (n.isEmpty() || c.isEmpty()) return false
+        val cur = snippets().filterNot { it.first == n } + (n to c)
+        val arr = org.json.JSONArray()
+        cur.takeLast(50).forEach { arr.put(org.json.JSONObject().put("name", it.first).put("cmd", it.second)) }
+        store.snippetsJson = arr.toString()
+        return true
+    }
+    fun deleteSnippet(name: String) {
+        val arr = org.json.JSONArray()
+        snippets().filterNot { it.first == name }.forEach { arr.put(org.json.JSONObject().put("name", it.first).put("cmd", it.second)) }
+        store.snippetsJson = arr.toString()
     }
 
     fun readFile(path: String): String =

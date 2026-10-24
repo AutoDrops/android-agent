@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -408,6 +409,7 @@ fun DevTab(vm: AgentViewModel) {
     var dirty by remember { mutableStateOf(false) }
     var term by remember { mutableStateOf("") }
     var cmd by remember { mutableStateOf("") }
+    var snipWarn by remember { mutableStateOf(false) }
     fun refresh() { vm.seedSampleProject(); files = vm.workspaceFiles() }
     LaunchedEffect(Unit) { refresh() }
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(8.dp)) {
@@ -432,14 +434,34 @@ fun DevTab(vm: AgentViewModel) {
                 visualTransformation = { androidx.compose.ui.text.input.TransformedText(Highlight.render(it.text), androidx.compose.ui.text.input.OffsetMapping.Identity) })
         }
         Divider(Modifier.padding(vertical = 4.dp), color = MxDim)
-        Text("Термінал (${vm.store.shellMode})", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Термінал (${vm.store.shellMode})", Modifier.weight(1f), fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+            vm.lastExitCode?.let { ec ->
+                val okc = ec == 0
+                Text("exit $ec", fontSize = 11.sp, fontFamily = mono, color = if (okc) MxGreen else Color(0xFFFF6E6E),
+                    modifier = Modifier.background(Color(0xFF07140C)).padding(horizontal = 6.dp, vertical = 2.dp))
+            }
+        }
+        // Saved snippets: tap to run, long-press ✕ to delete
+        val snips = vm.snippets()
+        if (snips.isNotEmpty()) LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 2.dp)) {
+            items(snips, key = { it.first }) { (name, c) ->
+                AssistChip(onClick = { cmd = c }, label = { Text(name, fontFamily = mono, fontSize = 11.sp) },
+                    trailingIcon = { Text("✕", color = MxGreen.copy(alpha = 0.6f), modifier = Modifier.clickable { vm.deleteSnippet(name) }) },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = Color(0xFF07140C), labelColor = MxGreen))
+            }
+        }
         SelectionContainer { Text(term.ifBlank { "> вивід тут." }, Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).background(Color(0xFF02060300)).padding(6.dp),
             fontFamily = mono, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.9f)) }
+        if (snipWarn) Text("Не збережено: команда схожа на секрет (ключ/пароль/токен).", fontSize = 10.sp, color = Color(0xFFFFC107), fontFamily = mono)
         if (vm.termBusy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MxGreen)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(cmd, { cmd = it }, Modifier.weight(1f), placeholder = { Text("$ команда", fontFamily = mono) }, singleLine = true,
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
-            Button(onClick = { vm.runTerminal(cmd, true) { term += "\n$ $cmd\n$it"; refresh() }; cmd = "" }, enabled = !vm.termBusy, modifier = Modifier.padding(start = 6.dp),
+            if (cmd.isNotBlank()) TextButton(onClick = { snipWarn = !vm.saveSnippet(cmd.take(16), cmd) }) { Text("＋сніпет", color = MxGreen, fontFamily = mono, fontSize = 11.sp) }
+            if (vm.termBusy) Button(onClick = { vm.stopTerminal() }, modifier = Modifier.padding(start = 6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107), contentColor = MxBg)) { Text("Stop", fontFamily = mono) }
+            else Button(onClick = { vm.runTerminal(cmd, true) { term += "\n$ $cmd\n$it"; refresh() }; cmd = "" }, enabled = cmd.isNotBlank(), modifier = Modifier.padding(start = 6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Text("Run", fontFamily = mono) }
         }
     }
@@ -450,8 +472,24 @@ fun NetworkTab(vm: AgentViewModel) {
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Head("Мережа / Пристрої")
         BigButton("Знайти пристрої (mDNS + SSDP)", { vm.send("Знайди пристрої в моїй локальній мережі (mDNS і SSDP) та покажи ТВ і колонки з control URL.") }, Modifier.fillMaxWidth())
+        BigButton("Жива карта хостів (ping+ARP)", { vm.send("Запусти net_discover і покажи живі хости моєї підмережі з MAC та іменами.") }, Modifier.fillMaxWidth())
         BigButton("Звіт безпеки мережі", { vm.send("Запусти security_report і поясни результати простими словами.") }, Modifier.fillMaxWidth())
         BigButton("Інфо Wi-Fi + локальні IP", { vm.send("Покажи network_info зі скануванням Wi-Fi.") }, Modifier.fillMaxWidth())
+        Text("Діагностика хоста (лише приватні IP; кожен скан з підтвердженням)", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
+        var diagIp by remember { mutableStateOf("") }
+        var diagErr by remember { mutableStateOf(false) }
+        OutlinedTextField(diagIp, { diagIp = it; diagErr = false }, Modifier.fillMaxWidth(), label = { Text("IP хоста у твоїй LAN (приватний)", fontFamily = mono) }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        if (diagErr) Text("Лише приватні адреси RFC1918 (10.x, 172.16-31.x, 192.168.x).", fontSize = 10.sp, color = Color(0xFFFFC107), fontFamily = mono)
+        fun diag(prompt: String) { val ip = diagIp.trim(); if (NetGuard.isPrivateV4(ip)) vm.send(prompt) else diagErr = true }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BigButton("TCP-скан", { diag("Зроби tcp_scan хоста ${diagIp.trim()} у моїй локальній мережі.") }, Modifier.weight(1f))
+            BigButton("Сервіси", { diag("Покажи open_services для ${diagIp.trim()} у моїй LAN.") }, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BigButton("Трасування", { diag("Зроби traceroute до ${diagIp.trim()}.") }, Modifier.weight(1f))
+            BigButton("TLS-сертиф.", { diag("Покажи ssl_cert_info для ${diagIp.trim()}:443.") }, Modifier.weight(1f))
+        }
         Divider(color = MxDim)
         Text("Інвентар пристроїв (збережені, з мітками)", fontFamily = mono, color = MxGreen)
         val devices by vm.devices().collectAsState(initial = emptyList())

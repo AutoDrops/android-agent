@@ -41,10 +41,23 @@ object Exec {
                 }
             }
         }.apply { isDaemon = true; start() }
-        val finished = p.waitFor(timeoutSec.toLong(), TimeUnit.SECONDS)
+        // Poll so the coroutine stays cancellable; a cancel (Stop button) kills the process tree.
+        var finished = false
+        var cancelled = false
+        val deadline = System.currentTimeMillis() + timeoutSec * 1000L
+        try {
+            while (System.currentTimeMillis() < deadline) {
+                ensureActive()
+                if (p.waitFor(200, TimeUnit.MILLISECONDS)) { finished = true; break }
+            }
+        } catch (ce: CancellationException) {
+            cancelled = true
+        }
         if (!finished) {
+            val pid = pidOf(p)
+            if (pid > 0) runCatching { ProcessBuilder("pkill", "-P", pid.toString()).start() }
             p.destroyForcibly()
-            runCatching { Runtime.getRuntime().exec(arrayOf("sh", "-c", "pkill -P ${pidOf(p)}")) }
+            if (cancelled) { reader.join(500); throw CancellationException("terminal stopped") }
         }
         reader.join(1500)
         val code = if (finished) p.exitValue() else -1

@@ -23,7 +23,7 @@ android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 10; versionName = "3.7"
+        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 11; versionName = "3.8"
         buildConfigField("String", "EMBEDDED_API_KEY", "\"${resolveEmbeddedKey()}\"")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }

@@ -13,7 +13,8 @@ object ModelCatalog {
         Cat("free", "Безкоштовні", "Моделі з нульовою ціною на OpenRouter"),
         Cat("vision", "Зір (vision)", "Розуміють зображення та скриншоти"),
         Cat("long", "Довгий контекст", "Велике вікно контексту (128K+)"),
-        Cat("unusual", "Незвичайні/цікаві", "Нішеві, експериментальні або унікальні моделі")
+        Cat("unusual", "Незвичайні/цікаві", "Нішеві, експериментальні або унікальні моделі"),
+        Cat("uncensored", "Без цензури", "Платні моделі OpenRouter з мінімальною цензурою (dolphin, venice тощо). Онлайн, не офлайн.")
     )
 
     fun toDouble(s: String?): Double = s?.toDoubleOrNull() ?: Double.MAX_VALUE
@@ -30,6 +31,9 @@ object ModelCatalog {
         toDouble(m.outPrice) in 0.0..0.0000015 && !isFree(m) ||
         listOf("mini", "flash", "haiku", "nano", "small", "lite", "8b", "7b").any { m.id.contains(it, true) }
     private fun isLong(m: ModelMeta) = m.ctx >= 128_000
+    private fun isUncensored(m: ModelMeta) =
+        listOf("uncensored", "abliterated", "dolphin", "venice", "unfiltered", "no-guardrails", "neversleep", "rocinante", "mythomax")
+            .any { m.id.contains(it, true) || m.name.contains(it, true) }
     private fun isUnusual(m: ModelMeta) =
         listOf("uncensored", "roleplay", "rp", "abliterated", "dolphin", "merge", "creative", "storytelling", "medical", "finance", "sonar", "perplexity")
             .any { m.id.contains(it, true) || m.name.contains(it, true) }
@@ -53,6 +57,7 @@ object ModelCatalog {
         "vision" -> models.filter { hasVision(it) }
         "long" -> models.filter { isLong(it) }.sortedByDescending { it.ctx }
         "unusual" -> models.filter { isUnusual(it) }
+        "uncensored" -> models.filter { isUncensored(it) }
         else -> models
     }.sortedBy { it.id }
 
@@ -78,6 +83,7 @@ object ModelCatalog {
             if (isLong(m)) add("великий контекст")
             if (isFast(m)) add("швидка й недорога")
             if (isFree(m)) add("безкоштовна")
+            if (isUncensored(m)) add("без цензури (мінімум обмежень)")
         }.ifEmpty { listOf("універсальна модель") }.joinToString(", ")
         val whenUse = when {
             isCode(m) -> "Варто брати для написання та рефакторингу коду, рев'ю та агентних задач."
