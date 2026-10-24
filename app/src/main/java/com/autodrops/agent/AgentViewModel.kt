@@ -163,12 +163,20 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         if (store.apiKey.isBlank()) { add("error", "Add your API key in the Models tab to start chatting."); return }
         val hv = Security.checkHost(store.baseUrl)
         if (!hv.allowed) { add("error", hv.warning ?: "Небезпечна адреса сервера."); return }
-        hv.warning?.let { add("info", it) }
         add("user", text)
         history.put(JSONObject().put("role", "user").put("content", text))
         busy = true
         runJob = viewModelScope.launch {
             try {
+                // Gate sending the API key to a non-allowlisted (but HTTPS) host behind explicit consent.
+                val host = hv.host
+                if (hv.warning != null && host != null && host !in store.approvedHosts) {
+                    val d = CompletableDeferred<Boolean>()
+                    pending = Confirm("Надіслати ключ на $host?", Risk.ELEVATED, (hv.warning ?: "") + "\n\nКлюч буде надіслано на $host. Підтверди лише якщо довіряєш цьому серверу.", d)
+                    val approved = d.await()
+                    if (!approved) { add("error", "Скасовано: ключ не надіслано на $host."); busy = false; return@launch }
+                    store.approvedHosts = store.approvedHosts + host
+                }
                 if (items.count { it.role == "user" } == 1) db.dao().touch(convId, text.take(40))
                 for (step in 1..maxSteps) {
                     val streaming = store.stream

@@ -33,6 +33,9 @@ class SecureStore(ctx: Context) {
     var matrixRain: Boolean
         get() = prefs.getBoolean("matrix_rain", true)
         set(v) = prefs.edit().putBoolean("matrix_rain", v).apply()
+    var approvedHosts: Set<String>
+        get() = prefs.getStringSet("approved_hosts", emptySet()) ?: emptySet()
+        set(v) = prefs.edit().putStringSet("approved_hosts", v).apply()
     var disabledTools: Set<String>
         get() = prefs.getStringSet("disabled_tools", emptySet()) ?: emptySet()
         set(v) = prefs.edit().putStringSet("disabled_tools", v).apply()

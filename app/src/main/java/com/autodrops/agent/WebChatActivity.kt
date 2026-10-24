@@ -5,6 +5,7 @@ import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebResourceRequest
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 
@@ -17,17 +18,25 @@ class WebChatActivity : ComponentActivity() {
     private lateinit var web: WebView
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val url = intent.getStringExtra("url") ?: "https://chatgpt.com"
+        val allowed = setOf("chatgpt.com", "chat.openai.com", "auth.openai.com", "grok.com", "x.ai", "accounts.google.com", "gemini.google.com", "google.com")
+        fun ok(host: String?): Boolean { val h = host?.lowercase() ?: return false; return allowed.any { h == it || h.endsWith(".$it") } }
+        val requested = intent.getStringExtra("url") ?: "https://chatgpt.com"
+        val url = if (ok(runCatching { android.net.Uri.parse(requested).host }.getOrNull())) requested else "https://chatgpt.com"
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.cacheMode = WebSettings.LOAD_DEFAULT
             settings.userAgentString = settings.userAgentString.replace("; wv", "")
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
+                    val h = req?.url?.host
+                    return if (ok(h)) false else true // block navigation outside approved sign-in domains
+                }
+            }
             webChromeClient = WebChromeClient()
         }
         CookieManager.getInstance().setAcceptCookie(true)
-        CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, false)
         setContentView(web)
         web.loadUrl(url)
     }

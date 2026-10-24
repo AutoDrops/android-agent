@@ -375,6 +375,12 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
 
     private suspend fun webFetch(url: String): String = withContext(Dispatchers.IO) {
         if (!url.startsWith("http://") && !url.startsWith("https://")) return@withContext "URL must start with http(s)://"
+        val targetHost = runCatching { java.net.URI(url).host }.getOrNull() ?: return@withContext "Invalid URL."
+        runCatching {
+            val addr = java.net.InetAddress.getByName(targetHost)
+            if (addr.isLoopbackAddress || addr.isSiteLocalAddress || addr.isLinkLocalAddress || addr.isAnyLocalAddress)
+                return@withContext "Відхилено: web_fetch не звертається до локальних/приватних адрес ($targetHost). Для сканування LAN використовуй інструменти мережі."
+        }
         runCatching {
             val http = okhttp3.OkHttpClient.Builder().connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS).followRedirects(true).build()
