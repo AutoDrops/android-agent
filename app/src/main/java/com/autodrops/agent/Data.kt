@@ -18,8 +18,14 @@ data class MessageEntity(
     val ts: Long = System.currentTimeMillis()
 )
 
+@Entity
+data class Recipe(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val prompt: String)
+
 @Dao
 interface ChatDao {
+    @Query("SELECT * FROM Recipe ORDER BY id DESC") fun recipes(): Flow<List<Recipe>>
+    @Insert suspend fun insert(r: Recipe): Long
+    @Query("DELETE FROM Recipe WHERE id = :id") suspend fun deleteRecipe(id: Long)
     @Query("SELECT * FROM Conversation ORDER BY updatedAt DESC") fun conversations(): Flow<List<Conversation>>
     @Query("SELECT * FROM MessageEntity WHERE convId = :id ORDER BY id") suspend fun messages(id: Long): List<MessageEntity>
     @Insert suspend fun insert(c: Conversation): Long
@@ -31,13 +37,13 @@ interface ChatDao {
     @Query("DELETE FROM Conversation") suspend fun wipeConvs()
 }
 
-@Database(entities = [Conversation::class, MessageEntity::class], version = 1, exportSchema = false)
+@Database(entities = [Conversation::class, MessageEntity::class, Recipe::class], version = 2, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun dao(): ChatDao
     companion object {
         @Volatile private var inst: AppDb? = null
         fun get(ctx: Context) = inst ?: synchronized(this) {
-            inst ?: Room.databaseBuilder(ctx.applicationContext, AppDb::class.java, "agent.db").build().also { inst = it }
+            inst ?: Room.databaseBuilder(ctx.applicationContext, AppDb::class.java, "agent.db").fallbackToDestructiveMigration().build().also { inst = it }
         }
     }
 }

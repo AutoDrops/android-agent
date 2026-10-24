@@ -30,12 +30,15 @@ class SecureStore(ctx: Context) {
     var favorites: Set<String>
         get() = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
         set(v) = prefs.edit().putStringSet("favorites", v).apply()
+    var matrixRain: Boolean
+        get() = prefs.getBoolean("matrix_rain", true)
+        set(v) = prefs.edit().putBoolean("matrix_rain", v).apply()
     var disabledTools: Set<String>
         get() = prefs.getStringSet("disabled_tools", emptySet()) ?: emptySet()
         set(v) = prefs.edit().putStringSet("disabled_tools", v).apply()
 
     /** Refuse to send the key over plaintext HTTP. */
-    fun baseUrlIsSafe() = baseUrl.startsWith("https://")
+    fun baseUrlIsSafe() = Security.checkHost(baseUrl).allowed
 
     companion object {
         const val DEFAULT_BASE = "https://openrouter.ai/api/v1"

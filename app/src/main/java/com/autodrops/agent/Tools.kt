@@ -119,6 +119,17 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
                 "text" to Schema.str("Text to find"), "id" to Schema.str("View id"), "value" to Schema.str("Value to type / global action"),
                 "x" to Schema.int("x"), "y" to Schema.int("y"), "x2" to Schema.int("x2"), "y2" to Schema.int("y2"), required = listOf("action")),
             risk = { if (it.str("action") == "dump") Risk.SENSITIVE else Risk.EFFECT }, exec = { uiAction(it) }))
+
+        add(ToolSpec("security_report", "Scan the local subnet and produce a network security posture report (open risky ports per host).",
+            Schema.obj(required = emptyList()), risk = { Risk.SENSITIVE }, exec = { securityReport() }))
+
+        add(ToolSpec("app_permissions", "Inspect an installed app: its declared permissions and which are dangerous.",
+            Schema.obj("package" to Schema.str("Package name"), required = listOf("package")),
+            risk = { Risk.LOW }, exec = { appPermissions(it.getString("package")) }))
+
+        add(ToolSpec("web_fetch", "Fetch a public web page and return its readable text (headless, on-device).",
+            Schema.obj("url" to Schema.str("http(s) URL"), required = listOf("url")),
+            risk = { Risk.SENSITIVE }, exec = { webFetch(it.getString("url")) }))
     }
 
     private val byName = specs.associateBy { it.name }
@@ -327,4 +338,59 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
             else -> "unknown action"
         }
     }
+
+    private suspend fun securityReport(): String {
+        val risky = mapOf(21 to "FTP", 22 to "SSH", 23 to "Telnet(!)", 139 to "SMB", 445 to "SMB",
+            3389 to "RDP", 5555 to "ADB(open!)", 8008 to "Cast", 1900 to "UPnP", 554 to "RTSP", 80 to "HTTP", 443 to "HTTPS")
+        val scan = Net.portScan(risky.keys.toList())
+        val sb = StringBuilder("Network security report (local subnet):\n")
+        if (scan.length() == 0) return sb.append("No hosts with these ports responded.").toString()
+        for (i in 0 until scan.length()) {
+            val h = scan.getJSONObject(i)
+            val ports = h.getJSONArray("open_ports")
+            val notes = (0 until ports.length()).map { val p = ports.getInt(it); "$p/${risky[p] ?: "?"}" }
+            sb.append("- ${h.getString("host")}: ${notes.joinToString(", ")}\n")
+            if (notes.any { it.contains("!") }) sb.append("  ⚠ risky service exposed\n")
+        }
+        sb.append("\nReview Telnet/open-ADB/RDP exposure; restrict to trusted devices.")
+        return sb.toString()
+    }
+
+    private fun appPermissions(pkg: String): String = runCatching {
+        val pm = ctx.packageManager
+        val info = pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_PERMISSIONS)
+        val perms = info.requestedPermissions ?: arrayOf()
+        if (perms.isEmpty()) return "No declared permissions for $pkg."
+        val dangerous = perms.filter {
+            runCatching { pm.getPermissionInfo(it, 0).protectionLevel and android.content.pm.PermissionInfo.PROTECTION_DANGEROUS != 0 }.getOrDefault(false)
+        }
+        buildString {
+            append("$pkg\nTotal permissions: ${perms.size}\n")
+            append("Dangerous (${dangerous.size}):\n")
+            dangerous.forEach { append("  ! ${it.substringAfterLast('.')}\n") }
+            append("Other: ${(perms.toList() - dangerous.toSet()).joinToString(", ") { it.substringAfterLast('.') }.take(1500)}")
+        }
+    }.getOrElse { "Cannot inspect $pkg: ${it.message}" }
+
+
+    private suspend fun webFetch(url: String): String = withContext(Dispatchers.IO) {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return@withContext "URL must start with http(s)://"
+        runCatching {
+            val http = okhttp3.OkHttpClient.Builder().connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS).followRedirects(true).build()
+            val req = okhttp3.Request.Builder().url(url).header("User-Agent", "Mozilla/5.0 DRON.exe").build()
+            http.newCall(req).execute().use { r ->
+                val body = r.body?.string() ?: ""
+                if (!r.isSuccessful) return@use "HTTP ${r.code}"
+                val text = body
+                    .replace(Regex("(?is)<script.*?</script>"), " ")
+                    .replace(Regex("(?is)<style.*?</style>"), " ")
+                    .replace(Regex("(?is)<[^>]+>"), " ")
+                    .replace(Regex("&nbsp;"), " ").replace(Regex("&amp;"), "&")
+                    .replace(Regex("[ \t]+"), " ").replace(Regex("""\n\s*\n+"""), "\n").trim()
+                "URL: $url\n\n" + text.take(12000)
+            }
+        }.getOrElse { "Fetch failed: ${Protocols.friendlyError(it.message)}" }
+    }
+
 }

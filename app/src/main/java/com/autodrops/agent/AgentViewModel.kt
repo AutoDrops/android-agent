@@ -26,6 +26,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     var autoApproveSession by mutableStateOf(false)
     var convId by mutableStateOf(0L); private set
     var maxSteps by mutableStateOf(12)
+    var matrixRain by mutableStateOf(store.matrixRain)
+    fun toggleMatrixRain(v: Boolean) { matrixRain = v; store.matrixRain = v }
     var models by mutableStateOf<List<ModelInfo>>(emptyList())
     var modelsError by mutableStateOf<String?>(null)
     private var runJob: Job? = null
@@ -121,6 +123,30 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     fun writeFile(path: String, content: String) {
         runCatching { java.io.File(Exec.workspace(getApplication()), path).apply { parentFile?.mkdirs() }.writeText(content) }
     }
+    // ---- Model catalog ----
+    var catalog by mutableStateOf<List<ModelMeta>>(emptyList())
+    var catalogBusy by mutableStateOf(false)
+
+    fun loadCatalog(forceLive: Boolean = false) {
+        viewModelScope.launch {
+            catalogBusy = true
+            if (catalog.isEmpty()) runCatching {
+                val seed = getApplication<Application>().assets.open("models_seed.json").bufferedReader().use { it.readText() }
+                catalog = ModelCatalog.parse(seed)
+            }
+            if (forceLive && store.apiKey.isNotBlank()) runCatching {
+                val live = llm.models(store.baseUrl, store.apiKey)
+                catalog = live.map { ModelMeta(it.id, it.name, it.context, it.promptPrice, it.completionPrice, emptyList(), "", if (it.tools) listOf("tools") else emptyList()) }
+            }
+            catalogBusy = false
+        }
+    }
+
+    // ---- Recipes ----
+    fun recipes() = db.dao().recipes()
+    fun saveRecipe(name: String, prompt: String) { viewModelScope.launch { db.dao().insert(Recipe(name = name.ifBlank { prompt.take(24) }, prompt = prompt)) } }
+    fun deleteRecipe(id: Long) { viewModelScope.launch { db.dao().deleteRecipe(id) } }
+
     fun conversations() = db.dao().conversations()
     fun startNew() { viewModelScope.launch { newConversation() } }
     fun stop() { runJob?.cancel(); busy = false }
@@ -135,7 +161,9 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         if (text.isBlank() || busy) return
         if (store.apiKey.isBlank()) { add("error", "Add your API key in the Models tab to start chatting."); return }
-        if (!store.baseUrlIsSafe()) { add("error", "Base URL must use https:// (refusing to send key over plaintext)."); return }
+        val hv = Security.checkHost(store.baseUrl)
+        if (!hv.allowed) { add("error", hv.warning ?: "Небезпечна адреса сервера."); return }
+        hv.warning?.let { add("info", it) }
         add("user", text)
         history.put(JSONObject().put("role", "user").put("content", text))
         busy = true
@@ -183,8 +211,10 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                                 result = if (allowed) runCatching { spec.exec(args) }.getOrElse { "Error: ${it.message}" } else "User denied this action."
                             }
                         }
-                        update(if (result.startsWith("User denied")) "denied" else "done", result.take(16000))
-                        history.put(JSONObject().put("role", "tool").put("tool_call_id", c.optString("id")).put("name", name).put("content", result.take(16000)))
+                        val redacted = Security.redact(result)
+                        val shown = if (Security.wasRedacted(result, redacted)) "$redacted\n[секрети приховано приватним фаєрволом]" else result
+                        update(if (result.startsWith("User denied")) "denied" else "done", shown.take(16000))
+                        history.put(JSONObject().put("role", "tool").put("tool_call_id", c.optString("id")).put("name", name).put("content", redacted.take(16000)))
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) { add("info", "Stopped.") }
