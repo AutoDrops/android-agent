@@ -198,7 +198,11 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
         runCatching {
             dadb.Dadb.create(host, port).use { db ->
                 when (a.getString("action")) {
-                    "keyevent" -> db.shell("input keyevent KEYCODE_${a.getString("key")}").output
+                    "keyevent" -> {
+                        val key = a.getString("key")
+                        if (!Protocols.isValidKey(key)) return@use "Unknown key '$key'"
+                        db.shell("input keyevent KEYCODE_${Protocols.normalizeKey(key)}").output
+                    }
                     "launch" -> db.shell("monkey -p ${a.getString("command")} -c android.intent.category.LAUNCHER 1").output
                     "shell" -> db.shell(a.getString("command")).output
                     else -> "unknown action"

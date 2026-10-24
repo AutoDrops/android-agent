@@ -55,10 +55,72 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             modelsError = null
             runCatching { llm.models(store.baseUrl, store.apiKey) }
-                .onSuccess { models = it }.onFailure { modelsError = it.message }
+                .onSuccess { models = it }.onFailure { modelsError = Protocols.friendlyError(it.message) }
         }
     }
 
+    // ---- Code review ----
+    var reviewBusy by mutableStateOf(false)
+    var reviewResult by mutableStateOf("")
+    var reviewError by mutableStateOf<String?>(null)
+
+    fun workspaceFiles(): List<String> {
+        val ws = Exec.workspace(getApplication())
+        return ws.walkTopDown().filter { it.isFile && it.length() < 400_000 }
+            .map { it.relativeTo(ws).path }.sorted().toList()
+    }
+
+    fun seedSampleProject() {
+        val ws = Exec.workspace(getApplication())
+        if (ws.listFiles()?.isNotEmpty() == true) return
+        java.io.File(ws, "hello.py").writeText("print('hello from the agent workspace')\n")
+        java.io.File(ws, "README.md").writeText("# Workspace\nEdit files here, run them in the terminal, or review them.\n")
+    }
+
+    fun runReview(paths: List<String>, model: String) {
+        if (store.apiKey.isBlank()) { reviewError = "Add your API key in the Models tab first."; return }
+        if (paths.isEmpty()) { reviewError = "Select at least one file to review."; return }
+        reviewBusy = true; reviewError = null; reviewResult = ""
+        viewModelScope.launch {
+            try {
+                val ws = Exec.workspace(getApplication())
+                val blob = paths.joinToString("\n\n") { p ->
+                    "// FILE: $p\n" + runCatching { java.io.File(ws, p).readText().take(40_000) }.getOrDefault("<unreadable>")
+                }
+                val msgs = JSONArray()
+                    .put(JSONObject().put("role", "system").put("content",
+                        "You are a senior code reviewer. Give a concise, prioritized review: bugs, security, style, with concrete fixes."))
+                    .put(JSONObject().put("role", "user").put("content", "Review these files:\n\n$blob"))
+                val msg = llm.complete(store.baseUrl, store.apiKey, model.ifBlank { store.model }, msgs, JSONArray(), false) {}
+                reviewResult = msg.optString("content", "").ifBlank { "(empty response)" }
+            } catch (e: Exception) { reviewError = Protocols.friendlyError(e.message) }
+            finally { reviewBusy = false }
+        }
+    }
+
+    // ---- Workspace terminal ----
+    var termBusy by mutableStateOf(false)
+    fun runTerminal(cmd: String, echoToChat: Boolean = true, onResult: (String) -> Unit) {
+        if (cmd.isBlank()) return
+        termBusy = true
+        viewModelScope.launch {
+            val out = runCatching { Exec.run(getApplication(), cmd, 30, store.shellMode) }
+                .getOrElse { "Error: " + Protocols.friendlyError(it.message) }
+            onResult(out)
+            if (echoToChat) {
+                val card = ToolCard("terminal", "$ $cmd", "done", out.take(8000))
+                items.add(ChatItem(nextId++, "tool", "", card))
+                db.dao().insert(MessageEntity(convId = convId, role = "tool", content = "$ $cmd\n$out".take(4000)))
+            }
+            termBusy = false
+        }
+    }
+
+    fun readFile(path: String): String =
+        runCatching { java.io.File(Exec.workspace(getApplication()), path).readText() }.getOrElse { "" }
+    fun writeFile(path: String, content: String) {
+        runCatching { java.io.File(Exec.workspace(getApplication()), path).apply { parentFile?.mkdirs() }.writeText(content) }
+    }
     fun conversations() = db.dao().conversations()
     fun startNew() { viewModelScope.launch { newConversation() } }
     fun stop() { runJob?.cancel(); busy = false }
@@ -72,7 +134,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
 
     fun send(text: String) {
         if (text.isBlank() || busy) return
-        if (store.apiKey.isBlank()) { add("error", "Set an API key in Models/Settings first."); return }
+        if (store.apiKey.isBlank()) { add("error", "Add your API key in the Models tab to start chatting."); return }
         if (!store.baseUrlIsSafe()) { add("error", "Base URL must use https:// (refusing to send key over plaintext)."); return }
         add("user", text)
         history.put(JSONObject().put("role", "user").put("content", text))
@@ -125,7 +187,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) { add("info", "Stopped.") }
-            catch (e: Exception) { add("error", e.message ?: e.toString()) }
+            catch (e: Exception) { add("error", Protocols.friendlyError(e.message)) }
             finally { busy = false; db.dao().touch(convId, items.firstOrNull { it.role == "user" }?.text?.take(40) ?: "Chat") }
         }
     }
