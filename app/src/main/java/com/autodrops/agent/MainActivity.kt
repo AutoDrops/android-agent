@@ -157,13 +157,26 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
         }
         if (vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MxGreen)
         var listening by remember { mutableStateOf(false) }
+        var offerVoiceDl by remember { mutableStateOf(false) }
+        val selVosk = VoskCatalog.byId(vm.voskSelected())
+        val voskInstalled = selVosk != null && vm.voskInstalled(selVosk)
+        fun beginListening() {
+            listening = true
+            vm.startVoice(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { msg -> listening = false; vm.addInfo("Мікрофон: $msg") })
+        }
+        if (offerVoiceDl && selVosk != null) AlertDialog(onDismissRequest = { offerVoiceDl = false }, containerColor = Color(0xFF07140C), textContentColor = MxGreen,
+            title = { Text("Офлайн-голос", fontFamily = mono, color = MxGreen) },
+            text = { Text(VoicePrompt.offerMessage(selVosk.name), fontFamily = mono, fontSize = 12.sp) },
+            confirmButton = { Button(onClick = { offerVoiceDl = false; vm.downloadVosk(selVosk) }, colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Text("Завантажити") } },
+            dismissButton = { TextButton(onClick = { offerVoiceDl = false; if (!vm.voskStrict()) beginListening() }) { Text(if (vm.voskStrict()) "Скасувати" else "Системний", color = MxGreen) } })
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconToggleButton(checked = vm.ragEnabled, onCheckedChange = { vm.ragEnabled = it }) {
                 Icon(Icons.Default.MenuBook, "chat with notes", tint = if (vm.ragEnabled) Color(0xFFFFC107) else MxGreen.copy(alpha = 0.6f))
             }
             IconButton(onClick = {
                 if (listening) { vm.voice.stop(); listening = false }
-                else { listening = true; vm.startVoice(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { msg -> listening = false; vm.addInfo("Мікрофон: $msg") }) }
+                else if (vm.voskDownloading == null && VoicePrompt.shouldOfferDownload(vm.voskEnabled(), vm.voskStrict(), voskInstalled)) offerVoiceDl = true
+                else beginListening()
             }) { Icon(if (listening) Icons.Default.MicOff else Icons.Default.Mic, "voice", tint = if (listening) Color(0xFFFFC107) else MxGreen) }
             OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("> повідомлення…", fontFamily = mono) }, maxLines = 4,
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
@@ -674,6 +687,23 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
             }
         }
         Divider(color = MxDim)
+        // ---- v3.18: prompt-length model routing ----
+        Text("Маршрутизація моделей за довжиною промпта", fontFamily = mono, color = MxGreen)
+        var routeOn by remember { mutableStateOf(vm.store.routingEnabled) }
+        var smallM by remember { mutableStateOf(vm.store.routingSmallModel) }
+        var largeM by remember { mutableStateOf(vm.store.routingLargeModel) }
+        var threshStr by remember { mutableStateOf(vm.store.routingThresholdChars.toString()) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(routeOn, { routeOn = it; vm.store.routingEnabled = it })
+            Text(if (routeOn) "Увімкнено: короткі → мала модель, довгі → сильна" else "Вимкнено (завжди обрана модель)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
+        }
+        if (routeOn) {
+            OutlinedTextField(smallM, { smallM = it; vm.store.routingSmallModel = it }, Modifier.fillMaxWidth(), label = { Text("Мала модель (slug, порожньо = обрана)", fontFamily = mono, fontSize = 11.sp) }, singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+            OutlinedTextField(largeM, { largeM = it; vm.store.routingLargeModel = it }, Modifier.fillMaxWidth(), label = { Text("Сильна модель (slug, порожньо = обрана)", fontFamily = mono, fontSize = 11.sp) }, singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+            OutlinedTextField(threshStr, { v -> threshStr = v; v.toIntOrNull()?.let { vm.store.routingThresholdChars = it } }, Modifier.fillMaxWidth(), label = { Text("Поріг довжини (символів)", fontFamily = mono, fontSize = 11.sp) }, singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+            Text("Промпт ≥ порога → сильна модель; інакше → мала. Порожнє поле = поточна обрана модель.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
+        }
+        Divider(color = MxDim)
         // ---- Local SLM: real downloadable model manager ----
         Text("Локальна модель (офлайн)", fontFamily = mono, color = MxGreen)
         Text(if (vm.engineLinked) "✓ Рушій on-device (MediaPipe) вшито у збірку (native .so). Завантаж .task-модель → кнопка ⚡ у чаті для офлайн-відповіді. Примітка: перша генерація не перевірена на твоєму конкретному пристрої — помилки будуть показані, не приховані." else "Рушій on-device не злінкований у цій збірці.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono)
@@ -709,6 +739,11 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(vm.voskStrict(), { vm.setVoskStrict(it) })
             Text("Строгий офлайн (не передавати аудіо системному розпізнавачу)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
+        }
+        var vadOn by remember { mutableStateOf(vm.store.vadAutoStop) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(vadOn, { vadOn = it; vm.store.vadAutoStop = it })
+            Text("Авто-стоп за тишею (VAD) — завершувати запис після паузи", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
         }
         vm.voskModels.forEach { m ->
             val have = vm.voskInstalled(m)

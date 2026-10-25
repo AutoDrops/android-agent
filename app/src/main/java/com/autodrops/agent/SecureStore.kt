@@ -68,6 +68,24 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
     var voskStrict: Boolean
         get() = prefs.getBoolean("vosk_strict", false)
         set(v) = prefs.edit().putBoolean("vosk_strict", v).apply()
+    /** v3.18: prompt-length-based model routing (off by default — backward-compatible). */
+    var routingEnabled: Boolean
+        get() = prefs.getBoolean("routing_enabled", false)
+        set(v) = prefs.edit().putBoolean("routing_enabled", v).apply()
+    var routingSmallModel: String
+        get() = prefs.getString("routing_small", "") ?: ""
+        set(v) = prefs.edit().putString("routing_small", v.trim()).apply()
+    var routingLargeModel: String
+        get() = prefs.getString("routing_large", "") ?: ""
+        set(v) = prefs.edit().putString("routing_large", v.trim()).apply()
+    var routingThresholdChars: Int
+        get() = prefs.getInt("routing_threshold", ModelRouter.DEFAULT_THRESHOLD)
+        set(v) = prefs.edit().putInt("routing_threshold", v.coerceIn(ModelRouter.MIN_THRESHOLD, ModelRouter.MAX_THRESHOLD)).apply()
+    /** v3.18: VAD auto-stop for voice input (on by default; conservative silence window). */
+    var vadAutoStop: Boolean
+        get() = prefs.getBoolean("vad_autostop", true)
+        set(v) = prefs.edit().putBoolean("vad_autostop", v).apply()
+
     /** Saved terminal snippets as a JSON array of {name,cmd}. */
     var snippetsJson: String
         get() = prefs.getString("snippets_json", "[]") ?: "[]"

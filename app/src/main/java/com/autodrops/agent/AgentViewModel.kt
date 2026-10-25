@@ -540,13 +540,19 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                     store.approvedHosts = store.approvedHosts + host
                 }
                 if (items.count { it.role == "user" } == 1) db.dao().touch(convId, text.take(40))
+                // v3.18: heuristic prompt-length model routing (off by default; backward-compatible).
+                val routedModel = ModelRouter.choose(store.routingEnabled, store.routingSmallModel,
+                    store.routingLargeModel, store.routingThresholdChars, store.model, text.length)
+                if (routedModel != store.model)
+                    ModelRouter.explain(routedModel, store.model, text.length, store.routingThresholdChars)
+                        .takeIf { it.isNotBlank() }?.let { add("info", it) }
                 var consecutiveErrors = 0
                 for (step in 1..maxSteps) {
                     val streaming = store.stream
-                    val supportsTools = catalog.firstOrNull { it.id == store.model }?.let { it.params.isEmpty() || it.params.contains("tools") } ?: true
+                    val supportsTools = catalog.firstOrNull { it.id == routedModel }?.let { it.params.isEmpty() || it.params.contains("tools") } ?: true
                     val toolSpec = if (supportsTools) reg.openAiTools() else JSONArray()
                     val streamItem = if (streaming) add("assistant", "") else null
-                    val msg = llm.complete(store.baseUrl, store.apiKey, store.model, history, toolSpec, streaming) { delta ->
+                    val msg = llm.complete(store.baseUrl, store.apiKey, routedModel, history, toolSpec, streaming) { delta ->
                         streamItem?.let { it.text += delta; items[items.indexOf(it)] = it.copy(text = it.text) }
                     }
                     val usage = parseUsage(msg); msg.remove("_usage")
@@ -570,23 +576,27 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                         fun update(s: String, o: String = card.output) { card.status = s; card.output = o; val idx = items.indexOf(item); if (idx >= 0) items[idx] = item.copy(card = card.copy(status = s, output = o)) }
                         val result: String
                         if (spec == null) { result = "Unknown tool '$name' (denied, fail-closed)." }
-                        else {
-                            val args = runCatching { JSONObject(argStr) }.getOrElse { JSONObject() }
-                            val err = Schema.validate(spec.schema, args)
-                            if (err != null) { result = "Invalid arguments: $err" }
-                            else {
-                                val risk = spec.risk(args)
-                                val autoOk = autoApproveSession && (risk == Risk.SENSITIVE)
-                                val needConfirm = risk != Risk.LOW && !autoOk
-                                card.preview = runCatching { spec.preview(args) }.getOrDefault(argStr)
-                                update("running")
-                                val allowed = if (needConfirm) {
-                                    update("awaiting approval")
-                                    val d = CompletableDeferred<Boolean>()
-                                    pending = Confirm(name, risk, card.preview, d)
-                                    d.await()
-                                } else true
-                                result = if (allowed) runCatching { spec.exec(args) }.getOrElse { "Error: ${it.message}" } else "User denied this action."
+                        else when (val parsed = ToolArgs.parse(name, argStr)) {
+                            // v3.18: self-correct on invalid tool-call JSON by asking the model to resend.
+                            is ToolArgs.Result.Invalid -> result = parsed.correction
+                            is ToolArgs.Result.Ok -> {
+                                val args = parsed.args
+                                val err = Schema.validate(spec.schema, args)
+                                if (err != null) { result = "Invalid arguments: $err" }
+                                else {
+                                    val risk = spec.risk(args)
+                                    val autoOk = autoApproveSession && (risk == Risk.SENSITIVE)
+                                    val needConfirm = risk != Risk.LOW && !autoOk
+                                    card.preview = runCatching { spec.preview(args) }.getOrDefault(argStr)
+                                    update("running")
+                                    val allowed = if (needConfirm) {
+                                        update("awaiting approval")
+                                        val d = CompletableDeferred<Boolean>()
+                                        pending = Confirm(name, risk, card.preview, d)
+                                        d.await()
+                                    } else true
+                                    result = if (allowed) runCatching { spec.exec(args) }.getOrElse { "Error: ${it.message}" } else "User denied this action."
+                                }
                             }
                         }
                         if (result.startsWith("Error:") || result.startsWith("Invalid arguments")) consecutiveErrors++ else consecutiveErrors = 0

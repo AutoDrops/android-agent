@@ -19,6 +19,8 @@ class VoiceInput(private val ctx: Context) {
     private var voskModel: org.vosk.Model? = null
     private var voskService: org.vosk.android.SpeechService? = null
     @Volatile var lastEngine: String = "system"; private set
+    // v3.18: VAD auto-stop state (pure detector). Null when VAD disabled for this session.
+    private var vad: SilenceDetector? = null
 
     val systemAvailable: Boolean get() = SpeechRecognizer.isRecognitionAvailable(ctx)
 
@@ -39,7 +41,7 @@ class VoiceInput(private val ctx: Context) {
         if (store.voskStrict) { onError("Строгий офлайн-режим: немає моделі Vosk. Завантаж модель у налаштуваннях."); return }
         lastEngine = "system"
         val lang = VoskCatalog.byId(store.voskModelId)?.lang?.let { when (it) { "uk" -> "uk-UA"; "ru" -> "ru-RU"; "en" -> "en-US"; else -> "uk-UA" } } ?: "uk-UA"
-        startSystem(lang, onPartial, onFinal, onError)
+        startSystem(lang, onPartial, onFinal, onError, store.vadAutoStop)
     }
 
     private fun startVosk(modelPath: String, onPartial: (String) -> Unit, onFinal: (String) -> Unit, onError: (String) -> Unit): Boolean {
@@ -66,9 +68,10 @@ class VoiceInput(private val ctx: Context) {
         } catch (t: Throwable) { onError("Vosk недоступний: " + Protocols.friendlyError(t.message)); stopVosk(); false }
     }
 
-    private fun startSystem(lang: String = "uk-UA", onPartial: (String) -> Unit, onFinal: (String) -> Unit, onError: (String) -> Unit) {
+    private fun startSystem(lang: String = "uk-UA", onPartial: (String) -> Unit, onFinal: (String) -> Unit, onError: (String) -> Unit, vadAutoStop: Boolean = false) {
         if (!systemAvailable) { onError("Розпізнавання мови недоступне на цьому пристрої."); return }
         stop()
+        vad = if (vadAutoStop) SilenceDetector().also { it.start(System.currentTimeMillis()) } else null
         try {
         sr = SpeechRecognizer.createSpeechRecognizer(ctx).apply {
             setRecognitionListener(object : RecognitionListener {
@@ -79,9 +82,16 @@ class VoiceInput(private val ctx: Context) {
                     b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let(onPartial)
                 }
                 override fun onError(error: Int) { onError("Помилка розпізнавання ($error)"); stop() }
-                override fun onReadyForSpeech(p: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(v: Float) {}
+                override fun onReadyForSpeech(p: Bundle?) { vad?.start(System.currentTimeMillis()) }
+                override fun onBeginningOfSpeech() { vad?.onActivity(System.currentTimeMillis()) }
+                override fun onRmsChanged(v: Float) {
+                    val d = vad ?: return
+                    val now = System.currentTimeMillis()
+                    d.onRms(v, now)
+                    // VAD auto-stop: end listening on a sustained silence after speech; stopListening
+                    // flushes the final result through onResults (no audio ever leaves on the Vosk path).
+                    if (d.shouldStop(now)) { vad = null; runCatching { sr?.stopListening() } }
+                }
                 override fun onBufferReceived(b: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onEvent(e: Int, b: Bundle?) {}
@@ -100,6 +110,7 @@ class VoiceInput(private val ctx: Context) {
         runCatching { voskModel?.close() }; voskModel = null
     }
     fun stop() {
+        vad = null
         runCatching { sr?.stopListening(); sr?.destroy() }; sr = null
         stopVosk()
     }
