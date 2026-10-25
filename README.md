@@ -1,62 +1,29 @@
-# AutoDrops Android Agent
+# DRON.exe
 
-On-device Android AI agent (Kotlin + Jetpack Compose) that chats with any OpenAI-compatible
-LLM (OpenRouter default, xAI, OpenAI…) and controls the phone and local network through
-function-calling tools, in an agentic loop (write files, run commands, read output, iterate).
+On-phone AI agent (Kotlin + Jetpack Compose) — Codex-on-Android. Ukrainian UI, Parrot/Kali aesthetic.
 
-## Features
-- **Chat** with streaming (SSE, incl. tool-call deltas) and a tabbed dark UI: Chat, History, Tools, Models, Remote.
-- **Model picker** from `/api/v1/models` with search, favorites (persisted) and per-model context/price/tool badges.
-- **History** persisted with Room.
-- **Agentic loop**: the model calls tools, sees output cards in chat, and keeps going up to N steps.
-- **Confirmation policy** by risk class (LOW/SENSITIVE/EFFECT/HIGH/ELEVATED), with an optional
-  *auto-approve non-elevated for this session* toggle. Shell/root always confirmed.
-- **Tools**: network_info, lan_scan (local subnet only), ping, dns_lookup, discover_devices (mDNS/NSD + SSDP),
-  dlna_control (AVTransport/RenderingControl), adbtv (ADB-over-network D-pad/keys/launch for Android TV),
-  toggle_settings (wifi/bt panels, brightness, volume, DND, flashlight), file_op (workspace sandbox),
-  shell (sandbox bash or root), run_script (Python/Node via Termux RUN_COMMAND), list_apps, launch_app,
-  notifications (listener), clipboard, contacts, send_sms (ACTION_SENDTO), ui_action (Accessibility).
-- **Remote** tab: discover, D-pad, volume, media launch shortcuts.
+**Repo:** [AutoDrops/android-agent](https://github.com/AutoDrops/android-agent)
 
-## Security
-- API key entered in-app, stored in **EncryptedSharedPreferences** (AES-256-GCM, master key in the
-  Android Keystore). Never in code, logs, or the repo. Refuses to send the key over non-HTTPS.
-- Tool output is treated as **untrusted** input; control characters are stripped from confirmation previews.
-- Unknown tools and invalid arguments **fail closed**.
+## What it does
+- **OpenRouter** — paste API key in-app (Android Keystore). Any model, category catalog, one-tap switch, streaming, clear HTTP errors. **No embedded keys.**
+- **ChatGPT / Codex (subscription)** — Sign in with ChatGPT like the open-source Codex CLI (`auth.openai.com`, public client id, PKCE, device-code preferred; browser loopback on `127.0.0.1:1455` as fallback). Tokens in Keystore. Models appear as `chatgpt/…` and use the Codex Responses backend with the same tool loop.
+- **Local GGUF** — download with % / MB / speed, explicit **Запустити**, offline chat via llama.cpp / MediaPipe.
+- **Agent tools** — shell, files, scripts, apps, accessibility, SMS (where permitted), own-LAN scans. Tool name + args + `exit=N · Xms` + stdout/stderr shown in chat. Models without native function-calling use a text/XML tool protocol; obvious shell intents are forced if the model only narrates. Dangerous actions need confirmation.
+- **Coding env** — workspace file tree, editor, terminal, snippets.
+- **LAN** — discover / ARP / ports / traceroute / DNS / SSL / TV(ADB) — **RFC1918 only**.
 
-## Scripting backend
-Python/Node run through the **Termux `RUN_COMMAND` intent** (requires Termux + `allow-external-apps=true`);
-in-app bash runs in the app sandbox via `sh -c`. Root/Shizuku optional. This keeps the app Play-safe and
-avoids bundling a proot rootfs.
+## Not in the public APK
+- OpenRouter keys, ChatGPT tokens, Google client secrets.
+- **Gemini as OAuth model** skipped: would require embedding Google's published client secret. Browser login to gemini.google.com remains on the Tools tab.
+- **Grok OAuth**: none public; use an xAI key via OpenAI-compatible base URL, or the Grok website button.
 
 ## Build
+```bash
+export JAVA_HOME=~/jdk17   # or any JDK 17
+./gradlew assembleDebug    # → app/build/outputs/apk/debug/app-debug.apk
+./gradlew testDebugUnitTest
 ```
-./gradlew assembleDebug   # -> app/build/outputs/apk/debug/app-debug.apk
-```
-Requires JDK 17 and the Android SDK (platform 34, build-tools 34).
+Never set `openrouter.api.key` / `EMBEDDED_API_KEY` for public releases.
 
-*MVP — not all tools tested on a physical device. Direct Wi-Fi/Bluetooth toggles open system panels on Android 10+.*
-
-## Build-time OpenRouter key (v3.1)
-The debug APK is built locally with an embedded first-run OpenRouter key so the app works on first launch.
-The key is read at build time from the `OPENROUTER_API_KEY` environment variable, or from
-`openrouter.api.key` in the **gitignored** `local.properties`, and injected as `BuildConfig.EMBEDDED_API_KEY`.
-It is **never committed** (`local.properties` and `*.apk` are gitignored) and never printed.
-`SecureStore` prefills `EncryptedSharedPreferences` from it on first launch only; the Models tab lets you
-replace or **clear** the key at any time (clearing disables re-seeding).
-For release builds from CI, the same key would need to be provided as a CI secret/env var — it is **not** in the repo.
-
-## v3.2 features
-- **Local RAG** (on-device embeddings, Room-persisted): tools `rag_add`/`rag_search`/`rag_list`/`rag_delete` + UI in Tools tab.
-- **Screen OCR**: user-granted MediaProjection capture → ML Kit OCR → `screen_ocr` tool (always consent, one frame, never background).
-- **Voice**: push-to-talk STT (Android SpeechRecognizer, uk-UA) in Chat. No custom wake-word (would need a bundled Vosk model).
-- **Proactive rules** (WorkManager, ~15-min period): charging / Wi-Fi SSID / interval triggers. Background jobs only read state & notify; agent actions are never run in the background without in-app confirmation.
-- **Local SLM**: downloadable-model path is stubbed to keep the APK small (~19MB); OpenRouter is the working fallback.
-
-## v3.3 features
-- **Agentic plan panel**: the agent declares steps (`set_plan`) and marks progress (`complete_step`), shown live in chat; plus a consecutive-error retry guard.
-- **Per-message token/cost meter**: real usage from OpenRouter (with client-side price fallback), per message and per session.
-- **RAG deepened**: ingest txt/md/pdf files (chunked) into the knowledge base; a "chat with my notes" toggle injects relevant notes as clearly-labeled untrusted data.
-- **LAN device inventory**: labeled, persistent device list (private IPs only) via UI and `inventory_add`/`inventory_list`/`inventory_label` tools.
-- **Backup**: export/import RAG + rules + device inventory + non-secret settings to JSON. The API key and approved hosts are never exported.
-- **QoL**: command palette, expandable/copyable error cards.
+## Security
+See [docs/security.md](docs/security.md). Tests/audit: [docs/test-report.md](docs/test-report.md), [docs/button-audit.md](docs/button-audit.md).

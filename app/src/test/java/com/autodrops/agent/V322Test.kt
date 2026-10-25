@@ -135,3 +135,67 @@ class V322Test {
     }
     @Test fun noEmbeddedKey() = assertEquals("", BuildConfig.EMBEDDED_API_KEY)
 }
+
+class V322IntentTest {
+    @Test fun dumpsysBattery() = assertEquals(listOf("dumpsys battery"), ForcedIntent.commands("Виконай dumpsys battery і покажи результат"))
+    @Test fun topN1() = assertEquals(listOf("top -n 1"), ForcedIntent.commands("Запусти top -n 1"))
+    @Test fun freeOrMeminfo() = assertEquals(listOf("free", "cat /proc/meminfo"), ForcedIntent.commands("Покажи free або cat /proc/meminfo"))
+    @Test fun dontExecuteRespected() {
+        assertTrue(ForcedIntent.forbidsExecution("Опиши команду ls, але не виконуй"))
+        assertTrue(ForcedIntent.commands("Опиши команду ls, але не виконуй").isEmpty())
+    }
+    @Test fun proseWithoutVerbIgnored() = assertTrue(ForcedIntent.commands("is there free space for ls of photos").isEmpty())
+    @Test fun backtickQuoted() = assertEquals(listOf("getprop ro.product.model"), ForcedIntent.commands("run `getprop ro.product.model` please"))
+    @Test fun execFormatStderrExitDuration() {
+        val o = Exec.format(1, true, 20, 42, "out\n", "boom\n")
+        assertTrue(o.startsWith("exit=1 · 42ms\nout")); assertTrue(o.contains("--- stderr ---\nboom"))
+        assertEquals(1, Regex("^exit=(-?\\d+)").find(o)!!.groupValues[1].toInt())
+    }
+}
+
+class V322EngineTest {
+    private val known = setOf("shell", "ping")
+    @Test fun nativeWins() {
+        val n = JSONArray().put(JSONObject().put("id", "c").put("function", JSONObject().put("name", "shell").put("arguments", "{}")))
+        val d = ToolCallEngine.decide("I'll run free", n, known, emptyList(), false, 2, 1)
+        assertSame(n, d.calls); assertFalse(d.textMode)
+    }
+    @Test fun textFallback() {
+        val d = ToolCallEngine.decide("```sh\nfree -m\n```", null, known, emptyList(), false, 2, 1)
+        assertEquals("shell", d.calls!!.getJSONObject(0).getJSONObject("function").getString("name")); assertTrue(d.textMode)
+    }
+    @Test fun forcedWhenNarrates() {
+        val d = ToolCallEngine.decide("I'll run dumpsys battery now.", null, known, listOf("dumpsys battery"), false, 2, 1)
+        assertTrue(d.forcedUsed); assertEquals("dumpsys battery", JSONObject(d.calls!!.getJSONObject(0).getJSONObject("function").getString("arguments")).getString("command"))
+    }
+    @Test fun noExecStops() {
+        val d = ToolCallEngine.decide("```sh\nls\n```", null, known, listOf("ls"), true, 2, 1)
+        assertNull(d.calls)
+    }
+    @Test fun nudgeWhenNarrates() {
+        val d = ToolCallEngine.decide("I'll run free -m for you.", null, known, emptyList(), false, 2, 1)
+        assertTrue(d.nudge)
+    }
+    @Test fun loopbackRejectsBadState() {
+        Thread {
+            Thread.sleep(80)
+            java.net.Socket("127.0.0.1", 1455).use { s ->
+                s.getOutputStream().write("GET /auth/callback?code=C&state=WRONG HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".toByteArray())
+                s.getInputStream().read()
+            }
+        }.start()
+        val e = runCatching { LoopbackAuth("GOOD", 1455).use { it.await(2000) } }.exceptionOrNull()
+        assertTrue(e!!.message!!.contains("State"))
+    }
+    @Test fun loopbackHappy() {
+        Thread {
+            Thread.sleep(80)
+            java.net.Socket("127.0.0.1", 1455).use { s ->
+                s.getOutputStream().write("GET /auth/callback?code=ABC&state=ST HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".toByteArray())
+                Thread.sleep(50); s.getInputStream().read()
+            }
+        }.start()
+        val r = LoopbackAuth("ST", 1455).use { it.await(2000) }
+        assertEquals("ABC", r.code); assertEquals("ST", r.state)
+    }
+}

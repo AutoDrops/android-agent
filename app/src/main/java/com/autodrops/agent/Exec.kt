@@ -18,15 +18,16 @@ object Exec {
         }
 
     private suspend fun process(ctx: Context, argv: List<String>, timeoutSec: Int, cwd: File): String = withContext(Dispatchers.IO) {
-        val pb = ProcessBuilder(argv).directory(cwd).redirectErrorStream(true)
+        val pb = ProcessBuilder(argv).directory(cwd)
         val env = pb.environment()
         val keep = setOf("PATH", "ANDROID_DATA", "ANDROID_ROOT", "BOOTCLASSPATH", "ANDROID_ART_ROOT",
             "ANDROID_I18N_ROOT", "ANDROID_TZDATA_ROOT", "LD_LIBRARY_PATH")
         env.keys.retainAll(keep)
         env["HOME"] = cwd.absolutePath
         env["TMPDIR"] = ctx.cacheDir.absolutePath
+        val t0 = System.currentTimeMillis()
         val p = pb.start()
-        val out = StringBuilder()
+        val out = StringBuilder(); val err = StringBuilder()
         var truncated = false
         val reader = Thread {
             runCatching {
@@ -40,6 +41,9 @@ object Exec {
                     }
                 }
             }
+        }.apply { isDaemon = true; start() }
+        val errReader = Thread {
+            runCatching { p.errorStream.bufferedReader().use { r -> r.lineSequence().forEach { l -> synchronized(err) { if (err.length < MAX_OUT / 2) err.appendLine(l) } } } }
         }.apply { isDaemon = true; start() }
         // Poll so the coroutine stays cancellable; a cancel (Stop button) kills the process tree.
         var finished = false
@@ -59,15 +63,20 @@ object Exec {
             p.destroyForcibly()
             if (cancelled) { reader.join(500); throw CancellationException("terminal stopped") }
         }
-        reader.join(1500)
+        reader.join(1500); errReader.join(500)
         val code = if (finished) p.exitValue() else -1
-        buildString {
-            append("exit=").append(code)
-            if (!finished) append(" (timeout ${timeoutSec}s, killed)")
-            append('\n')
-            append(synchronized(out) { out.toString() })
-            if (truncated) append("\n...[output truncated]")
-        }
+        format(code, finished, timeoutSec, System.currentTimeMillis() - t0, synchronized(out) { out.toString() }, synchronized(err) { err.toString() }, truncated)
+    }
+
+    /** "exit=N · Xms" header (parsed by the UI), then stdout, then a separate stderr section. */
+    fun format(code: Int, finished: Boolean, timeoutSec: Int, ms: Long, stdout: String, stderr: String, truncated: Boolean = false) = buildString {
+        append("exit=").append(code)
+        if (!finished) append(" (timeout ${timeoutSec}s, killed)")
+        append(" · ").append(ms).append("ms\n")
+        append(stdout)
+        if (truncated) append("\n...[output truncated]")
+        if (stderr.isNotBlank()) { if (!endsWith("\n")) append('\n'); append("--- stderr ---\n").append(stderr.trimEnd()) }
+        if (stdout.isBlank() && stderr.isBlank()) append("(немає виводу)")
     }
 
     private fun pidOf(p: Process): Long = runCatching {

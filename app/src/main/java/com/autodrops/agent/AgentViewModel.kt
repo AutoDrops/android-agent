@@ -271,6 +271,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     var modelBytes by mutableStateOf(0L)
     var modelTotal by mutableStateOf(0L)
     var modelProgress by mutableStateOf(0f)
+    var modelSpeed by mutableStateOf("")
     var modelStatus by mutableStateOf("")
     fun isModelDownloaded(m: LocalModel) = modelMgr.isDownloaded(m)
     fun modelSizeMb(m: LocalModel) = (modelMgr.sizeOnDisk(m) / 1_048_576L).toInt()
@@ -278,9 +279,15 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         if (modelDownloading != null) return
         val free = runCatching { val sf = android.os.StatFs(getApplication<android.app.Application>().filesDir.path); sf.availableBytes }.getOrDefault(Long.MAX_VALUE)
         if (free < m.sizeMb * 1_258_291L /* sizeMb*1.2MB */) { modelStatus = "Недостатньо місця: потрібно ~${(m.sizeMb*1.2).toInt()} МБ вільного."; return }
-        modelDownloading = m.id; modelProgress = 0f; modelBytes = 0; modelTotal = m.sizeMb * 1_048_576L; modelStatus = "Завантаження ${m.name}…"
+        modelDownloading = m.id; modelProgress = 0f; modelBytes = 0; modelTotal = m.sizeMb * 1_048_576L; modelSpeed = ""; modelStatus = "Завантаження ${m.name}…"
         viewModelScope.launch {
-            val p = modelMgr.download(m) { pr -> modelBytes = pr.downloadedBytes; modelTotal = maxOf(pr.totalBytes, m.sizeMb * 1_048_576L); if (modelTotal > 0) modelProgress = pr.downloadedBytes.toFloat() / modelTotal }
+            val t0 = System.currentTimeMillis(); var lastB = 0L; var lastT = t0
+            val p = modelMgr.download(m) { pr ->
+                modelBytes = pr.downloadedBytes; modelTotal = maxOf(pr.totalBytes, m.sizeMb * 1_048_576L)
+                if (modelTotal > 0) modelProgress = pr.downloadedBytes.toFloat() / modelTotal
+                val now = System.currentTimeMillis(); val dt = now - lastT
+                if (dt >= 500) { val kbps = ((pr.downloadedBytes - lastB) * 1000.0 / dt / 1024).toInt(); modelSpeed = "$kbps КБ/с"; lastB = pr.downloadedBytes; lastT = now }
+            }
             modelStatus = when {
                 p.error != null -> "Помилка: ${p.error}"
                 p.verified -> "Готово. SHA-256 перевірено."
@@ -566,7 +573,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     /** Device-code login (Codex CLI flow): show user_code, open auth.openai.com/codex/device, poll. */
     fun chatGptLogin(openUrl: (String) -> Unit) {
         if (cgBusy) return
-        cgBusy = true; cgStatus = "Отримую код входу…"; cgUserCode = ""
+        cgBusy = true; OAuthLog.add("device","start"); cgStatus = "Отримую код входу…"; cgUserCode = ""
         cgJob = viewModelScope.launch {
             try {
                 val dc = cg.startDevice()
@@ -576,17 +583,43 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                 val t = cg.pollDevice(dc)
                 cg.liveModels()?.let { cgStore.models = it }
                 refreshChatGptState(); cgUserCode = ""
-                cgStatus = "✓ Вхід виконано${if (t.email.isNotBlank()) " (${t.email})" else ""}. Моделі ChatGPT додано в список."
+                OAuthLog.add("device","ok"); cgStatus = "✓ Вхід виконано${if (t.email.isNotBlank()) " (${t.email})" else ""}. Моделі ChatGPT додано в список."
             } catch (e: kotlinx.coroutines.CancellationException) { cgStatus = "Вхід скасовано." }
-            catch (e: Exception) { cgStatus = "ПОМИЛКА: " + (e.message ?: e.javaClass.simpleName) }
+            catch (e: Exception) { OAuthLog.add("device", e.message ?: "err"); cgStatus = "ПОМИЛКА: " + (e.message ?: e.javaClass.simpleName) }
             finally { cgBusy = false }
         }
     }
     fun cancelChatGptLogin() { cgJob?.cancel(); cgBusy = false; cgUserCode = "" }
+    /** Browser/Custom-Tab PKCE + local 127.0.0.1:1455 callback (Codex CLI desktop flow). Fallback if device-code 404s. */
+    fun chatGptLoginBrowser(openUrl: (String) -> Unit) {
+        if (cgBusy) return
+        cgBusy = true; OAuthLog.add("browser","start PKCE"); cgStatus = "Готую браузерний вхід (PKCE)…"; cgUserCode = ""
+        cgJob = viewModelScope.launch {
+            try {
+                val pkce = ChatGptOAuth.pkce(); val st = ChatGptOAuth.state()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    LoopbackAuth(st).use { lb ->
+                        val url = ChatGptOAuth.authorizeUrl(pkce, st, lb.redirectUri)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            cgStatus = "Відкриваю браузер… після входу повернись у додаток."
+                            openUrl(url)
+                        }
+                        val r = lb.await()
+                        cg.exchange(r.code, pkce.verifier, lb.redirectUri)
+                    }
+                }
+                cg.liveModels()?.let { cgStore.models = it }; refreshChatGptState()
+                OAuthLog.add("browser","ok"); cgStatus = "✓ Вхід через браузер виконано${if (cgEmail.isNotBlank()) " ($cgEmail)" else ""}."
+            } catch (e: kotlinx.coroutines.CancellationException) { cgStatus = "Вхід скасовано." }
+            catch (e: Exception) { OAuthLog.add("browser", e.message ?: "err"); cgStatus = "ПОМИЛКА (браузер): " + (e.message ?: e.javaClass.simpleName) }
+            finally { cgBusy = false }
+        }
+    }
     fun chatGptLogout() {
         cgStore.clear(); refreshChatGptState(); cgStatus = "Вихід виконано, токени видалено."
         if (ChatGptOAuth.isChatGptModel(store.model)) store.model = SecureStore.DEFAULT_MODEL
     }
+    fun oauthLog() = OAuthLog.lines()
     fun chatGptRefresh() { viewModelScope.launch {
         cgStatus = runCatching { cg.refresh(); refreshChatGptState(); "✓ Токен оновлено." }.getOrElse { refreshChatGptState(); "ПОМИЛКА: ${it.message}" }
     } }
@@ -646,13 +679,16 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                         .takeIf { it.isNotBlank() }?.let { add("info", it) }
                 var consecutiveErrors = 0
                 var nudges = 0
+                val noExec = ForcedIntent.forbidsExecution(text)
+                var forced = ForcedIntent.commands(text)
+                if (noExec) add("info", "Ти попросив не виконувати — інструменти вимкнено для цього запиту.")
                 val known = reg.openAiTools().let { a -> (0 until a.length()).map { a.getJSONObject(it).getJSONObject("function").getString("name") }.toSet() }
                 for (step in 1..maxSteps) {
                     val streaming = store.stream || isCg
                     val supportsTools = isCg || catalog.firstOrNull { it.id == routedModel }?.let { it.params.isEmpty() || it.params.contains("tools") } ?: true
-                    val toolSpec = if (supportsTools) reg.openAiTools() else JSONArray()
+                    val toolSpec = if (supportsTools && !noExec) reg.openAiTools() else JSONArray()
                     // v3.22: models without native tools get the text tool protocol in the system prompt.
-                    val sendHistory = if (supportsTools) history else JSONArray(history.toString()).also { h ->
+                    val sendHistory = if (supportsTools || noExec) history else JSONArray(history.toString()).also { h ->
                         val sys = h.getJSONObject(0); sys.put("content", sys.optString("content") + "\n\n" + TextTools.instructions(known)) }
                     val streamItem = if (streaming) add("assistant", "") else null
                     val onDelta: (String) -> Unit = { delta ->
@@ -669,22 +705,21 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
 
                     var calls = msg.optJSONArray("tool_calls")
                     var textMode = false
-                    if (calls == null || calls.length() == 0) {
-                        // v3.22 fallback: tool blocks written as text (models that ignore/lack native tool calling).
-                        val parsed = TextTools.parse(content, known)
-                        if (parsed.isNotEmpty()) { calls = TextTools.toToolCalls(parsed, step); textMode = true
-                            add("info", "Модель не викликала інструмент напряму — виконую ${parsed.size} команд(и) з її тексту.") }
-                        else if (TextTools.narratesWithoutAction(content) && nudges < 2) {
-                            nudges++; add("info", "Модель лише описала команди — прошу її реально їх виконати…")
-                            history.put(JSONObject().put("role", "user").put("content", TextTools.NUDGE + if (!supportsTools) "\n" + TextTools.instructions(known) else ""))
-                            continue
-                        } else {
-                            if (TtsPolicy.shouldSpeak(store.speakReplies, content)) runCatching { speaker.speak(content) }
-                            break
-                        }
+                    val dec = ToolCallEngine.decide(content, calls, known - store.disabledTools, forced, noExec, 2 - nudges, step)
+                    if (dec.info != null) add("info", dec.info)
+                    if (dec.nudge) {
+                        nudges++; history.put(JSONObject().put("role", "user").put("content", TextTools.NUDGE + if (!supportsTools) "\n" + TextTools.instructions(known) else ""))
+                        continue
                     }
-                    for (i in 0 until calls.length()) {
-                        val c = calls.getJSONObject(i); val fn = c.getJSONObject("function")
+                    if (dec.calls == null) {
+                        if (TtsPolicy.shouldSpeak(store.speakReplies, content)) runCatching { speaker.speak(content) }
+                        break
+                    }
+                    calls = dec.calls; textMode = dec.textMode
+                    if (dec.forcedUsed) forced = emptyList()
+                    val callsNN = calls ?: JSONArray()
+                    for (i in 0 until callsNN.length()) {
+                        val c = callsNN.getJSONObject(i); val fn = c.getJSONObject("function")
                         val name = fn.getString("name"); val argStr = fn.optString("arguments", "{}")
                         val spec = if (name in store.disabledTools) null else reg.get(name)
                         val card = ToolCard(name, argStr.take(400), "running")
@@ -722,6 +757,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                         if (textMode) history.put(JSONObject().put("role", "user").put("content", TextTools.resultMessage(name, argStr, redacted.take(16000))))
                         else history.put(JSONObject().put("role", "tool").put("tool_call_id", c.optString("id")).put("name", name).put("content", redacted.take(16000)))
                     }
+                    forced = emptyList()
                     if (consecutiveErrors >= 3) { add("info", "Зупинено: 3 помилки інструментів поспіль (захист від зациклення). Уточни запит."); break }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) { add("info", "Stopped.") }

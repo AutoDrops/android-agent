@@ -257,3 +257,16 @@ class ChatGptClient(private val store: ChatGptTokenStore, private val http: OkHt
         }
     } }.getOrNull()?.takeIf { it.isNotEmpty() }
 }
+
+/** Sanitized OAuth event log (no tokens/codes ever stored). */
+object OAuthLog {
+    private val buf = ArrayDeque<String>()
+    private val secret = Regex("(?i)(access_token|refresh_token|id_token|code|code_verifier|authorization_code)([\"=:\\s]+)[A-Za-z0-9._~+/-]{6,}")
+    private val jwt = Regex("eyJ[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*")
+    fun sanitize(s: String) = jwt.replace(secret.replace(s) { it.groupValues[1] + it.groupValues[2] + "***" }, "***jwt***")
+    @Synchronized fun add(stage: String, msg: String) {
+        val t = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        buf.addLast("$t [$stage] ${sanitize(msg).take(300)}"); while (buf.size > 50) buf.removeFirst()
+    }
+    @Synchronized fun lines(): List<String> = buf.toList()
+}

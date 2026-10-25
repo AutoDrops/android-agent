@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeFalse
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,7 +17,7 @@ class LiveTextToolsTest {
     private val keyFile = File(System.getenv("DRON_LIVE_KEY_FILE") ?: "/workspace/free-api/keys/openrouter-dron.key")
     private val known = setOf("shell", "ping", "file_read")
 
-    private fun run(model: String): String = runBlocking {
+    private fun run(model: String): String = try { runBlocking {
         assumeTrue(keyFile.canRead()); val k = keyFile.readText().trim(); val c = LlmClient()
         val h = JSONArray().put(JSONObject().put("role", "system").put("content", "You are an on-device Android agent.\n\n" + TextTools.instructions(known)))
             .put(JSONObject().put("role", "user").put("content", "How much RAM is free on my phone? Run free -m."))
@@ -35,6 +36,8 @@ class LiveTextToolsTest {
         println("LIVE $model call=${calls[0].name} ${calls[0].arguments} final=${fin.take(160).replace('\n',' ')}")
         assertTrue("final mentions result: $fin", fin.contains("3612") || fin.contains("3.6") || fin.contains("3,6") || fin.contains("3.5"))
         fin
+    } } catch (e: RuntimeException) {
+        assumeFalse("budget/rate: ${e.message}", e.message?.contains("HTTP 402") == true || e.message?.contains("HTTP 429") == true); throw e
     }
     @Test fun dolphinVenice() { run(System.getenv("DRON_DOLPHIN") ?: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free") }
     @Test fun freeModel() { run(System.getenv("DRON_FREE") ?: "poolside/laguna-s-2.1:free") }

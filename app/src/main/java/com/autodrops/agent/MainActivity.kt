@@ -160,7 +160,7 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
             Text("DRON.exe", Modifier.clickable { onOpenModels() }, color = MxGreen, fontFamily = mono, fontSize = 18.sp)
             Spacer(Modifier.weight(1f))
             if (vm.sessionUsage.totalTokens > 0) Text(vm.sessionUsage.label(), color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp, modifier = Modifier.padding(end = 6.dp))
-            Text("▾ ${vm.store.model.substringAfterLast('/')}", Modifier.clickable { onOpenModels() }, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp)
+            Text("▾ ${vm.store.model.substringAfterLast('/')}", Modifier.clickable { onOpenModels() }.widthIn(max = 180.dp), color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         PlanPanel()
         if (!vm.hasKey && !(ChatGptOAuth.isChatGptModel(vm.store.model) && vm.cgSignedIn)) Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpenModels() },
@@ -229,8 +229,12 @@ fun ToolCardView(card: ToolCard) {
             if (card.status == "running" || card.status == "awaiting approval") CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = MxGreen)
             Text("  🛠 ${card.name} · ${card.status}", fontSize = 13.sp, color = MxGreen, fontFamily = mono)
         }
-        if (card.preview.isNotBlank()) Text(sanitizeForDisplay(card.preview), fontFamily = mono, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.75f))
-        if (card.output.isNotBlank()) SelectionContainer { Text(sanitizeForDisplay(card.output.take(4000)), fontFamily = mono, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.9f), modifier = Modifier.padding(top = 4.dp)) }
+        if (card.preview.isNotBlank()) Text("args: " + sanitizeForDisplay(card.preview), fontFamily = mono, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.75f))
+        if (card.output.isNotBlank()) {
+            val head = card.output.lineSequence().firstOrNull().orEmpty()
+            if (head.startsWith("exit=")) Text(head, fontFamily = mono, fontSize = 11.sp, color = Color(0xFFFFC107))
+            SelectionContainer { Text(sanitizeForDisplay(card.output.take(4000)), fontFamily = mono, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.9f), modifier = Modifier.padding(top = 2.dp)) }
+        }
     }
 }
 
@@ -278,7 +282,7 @@ fun ModelsTab(vm: AgentViewModel, onPicked: () -> Unit) {
                     colors = CardDefaults.cardColors(containerColor = if (m.id == vm.store.model) Color(0xFF0B2A16) else MxCard), border = MxCardBorder) {
                     Column(Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(m.id, Modifier.weight(1f), fontSize = 16.sp, color = MxGreen, fontFamily = mono)
+                            Text(m.id, Modifier.weight(1f), fontSize = 14.sp, color = MxGreen, fontFamily = mono, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                             TextButton(onClick = { expanded = if (expanded == m.id) null else m.id }) { Text(if (expanded == m.id) "▴" else "ℹ", color = MxGreen) }
                         }
                         Text("ctx ${m.ctx} · in ${m.inPrice} · out ${m.outPrice}", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
@@ -760,7 +764,7 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
                     Text("~${m.sizeMb} МБ · ${m.note}", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
                     if (vm.modelDownloading == m.id) {
                         LinearProgressIndicator(progress = vm.modelProgress.coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth().height(10.dp).padding(top = 4.dp), color = MxGreen, trackColor = MxDim)
-                        Text("${(vm.modelProgress * 100).toInt().coerceIn(0, 100)}% · ${vm.modelBytes / 1_048_576} / ${vm.modelTotal / 1_048_576} МБ", color = MxGreen, fontFamily = mono, fontSize = 13.sp)
+                        Text("${(vm.modelProgress * 100).toInt().coerceIn(0, 100)}% · ${vm.modelBytes / 1_048_576} / ${vm.modelTotal / 1_048_576} МБ" + (if (vm.modelSpeed.isNotBlank()) " · ${vm.modelSpeed}" else ""), color = MxGreen, fontFamily = mono, fontSize = 13.sp)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
                         if (!have) BigButton(if (vm.modelDownloading == m.id) "Завантаження…" else "Завантажити", { vm.downloadModel(m) }, enabled = vm.modelDownloading == null)
@@ -1042,8 +1046,13 @@ fun ChatGptSection(vm: AgentViewModel, onPicked: () -> Unit) {
                 if (vm.cgBusy) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     BigButton("Відкрити сторінку входу", { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(ChatGptOAuth.DEVICE_PAGE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
                     TextButton(onClick = { vm.cancelChatGptLogin() }) { Text("Скасувати", color = MxGreen, fontFamily = mono) }
-                } else BigButton("Увійти через ChatGPT", { vm.chatGptLogin { url ->
-                    ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }, Modifier.fillMaxWidth())
+                } else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BigButton("Увійти через ChatGPT", { vm.chatGptLogin { url ->
+                        ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }, Modifier.fillMaxWidth())
+                    TextButton(onClick = { vm.chatGptLoginBrowser { url ->
+                        ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) {
+                        Text("Або вхід через браузер (PKCE / 127.0.0.1:1455)", color = MxGreen, fontFamily = mono, fontSize = 11.sp) }
+                }
                 if (vm.cgUserCode.isNotBlank()) SelectionContainer { Text("Код: ${vm.cgUserCode}", color = Color(0xFFFFC107), fontFamily = mono, fontSize = 22.sp) }
             } else {
                 LazyRowChips(vm.cgModels.map { it to it }, ChatGptOAuth.backendModel(vm.store.model)) { vm.selectChatGptModel(it); onPicked() }
@@ -1053,6 +1062,7 @@ fun ChatGptSection(vm: AgentViewModel, onPicked: () -> Unit) {
                 }
             }
             if (vm.cgStatus.isNotBlank()) Text(vm.cgStatus, fontSize = 12.sp, fontFamily = mono, color = if (vm.cgStatus.startsWith("ПОМИЛКА")) Color(0xFFFF6E6E) else MxGreen)
+            val log = vm.oauthLog(); if (log.isNotEmpty()) Text(log.takeLast(6).joinToString("\n"), fontSize = 10.sp, fontFamily = mono, color = MxGreen.copy(alpha = 0.55f))
         }
     }
 }
