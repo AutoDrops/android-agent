@@ -212,11 +212,13 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
             risk = { Risk.LOW }, exec = { Lan.macVendor(it.getString("mac"), ctx.cacheDir) }))
 
         // ---- Local RAG (on-device embeddings, persists in Room) ----
-        add(ToolSpec("rag_add", "Save a note/snippet to the local knowledge base (on-device embeddings).",
+        add(ToolSpec("rag_add", "Save a note/snippet to the local knowledge base (on-device embeddings). Writes to on-device storage — gated.",
             Schema.obj("title" to Schema.str("short title"), "content" to Schema.str("text to remember"), required = listOf("title", "content")),
-            risk = { Risk.LOW }, exec = {
+            risk = { Risk.EFFECT }, exec = {
                 val c = it.getString("content")
-                val id = db.dao().insert(RagDoc(title = it.getString("title"), content = c, embedding = Embeddings.encode(Embeddings.embed(it.getString("title") + " " + c))))
+                val title = it.getString("title")
+                val vec = Embedder.embed(store, LlmClient(), "$title $c")
+                val id = db.dao().insert(RagDoc(title = title, content = c, embedding = Embeddings.encode(vec)))
                 "Збережено в базу знань (id=$id)."
             }))
         add(ToolSpec("rag_search", "Semantic search of the local knowledge base.",

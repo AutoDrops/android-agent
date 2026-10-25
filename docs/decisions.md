@@ -201,3 +201,11 @@ Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; 
 - **Uncensored PAID models**: new **«Без цензури»** catalog category surfaces OpenRouter paid uncensored models (dolphin/venice/abliterated/unfiltered/…). Local on-device SLM path kept **honest** (MediaPipe engine wired+compiled, needs a compatible model) — **no fake offline uncensored entry** (BPE `.task` bundling still blocked per v3.7). **Gemma untouched** (awaiting license decision).
 - **Codex advisory** (openai/gpt-5.3-codex, $0.0407): applied all 5 findings — rethrow genuine CancellationException (only soft-handle user Stop), move `termBusy=false` into `finally`, snippet secret-pattern guard (won't persist keys/passwords/tokens), pkill without shell + pid>0, enforce private-IP in NetworkTab UI.
 - Version 3.7→3.8 (code 11). +5 unit tests (V38Test) green; full suite green (matrixRain snapshot re-recorded). No features removed. Secret-scan clean; key only in APK dex, not in tracked source.
+
+## v3.14 — RAG completeness: remote embeddings option + rag_add gating (2026-10-25)
+- **Already present (honest, not re-built):** Chunking (overlap windows), on-device hashing embeddings (DIM=256), Room `RagDoc` + DAO, RagContext injection into chat, tools `rag_add`/`rag_search`/`rag_list`/`rag_delete`, KB UI (paste + file picker txt/md/pdf via PdfBox-Android), chat-with-notes toggle. Prior coverage in V32/V33.
+- **NEW this release:**
+  1. Optional **remote OpenAI-compatible embeddings** (`RemoteEmbeddings` + `LlmClient.embed` + `Embedder`) using the user's in-app key/baseUrl. Toggle + model field in KB UI. Falls back to on-device hashing when remote is off, key is blank, host is unsafe, or the call fails. Default model `openai/text-embedding-3-small`.
+  2. **`rag_add` risk raised LOW → EFFECT** (writes to on-device storage now require in-app confirmation). `rag_search`/`rag_list` stay LOW; `rag_delete` stays SENSITIVE.
+  3. All ingest/search paths (tools, addRag, ingestText, import, chat inject) go through `Embedder`.
+- Gate-not-remove: no features cut. Built + unit-tested; not verified on real hardware (no emulator/KVM). Secret-scan required before commit. No keys in repo.

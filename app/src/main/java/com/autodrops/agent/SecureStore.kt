@@ -66,6 +66,15 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
         set(v) = prefs.edit().putString("snippets_json", v).apply()
 
     /** Prefill the embedded build-time key once, only if the user hasn't set/cleared one. */
+    /** RAG: use remote OpenAI-compatible embeddings (user key) instead of the on-device fallback. */
+    var embeddingRemote: Boolean
+        get() = prefs.getBoolean("embedding_remote", false)
+        set(v) = prefs.edit().putBoolean("embedding_remote", v).apply()
+    /** OpenAI-compatible embedding model slug. Default: openai/text-embedding-3-small via OpenRouter. */
+    var embeddingModel: String
+        get() = prefs.getString("embedding_model", RemoteEmbeddings.DEFAULT_MODEL) ?: RemoteEmbeddings.DEFAULT_MODEL
+        set(v) = prefs.edit().putString("embedding_model", v.trim()).apply()
+
     fun seedEmbeddedKeyIfNeeded() {
         if (prefs.getBoolean("key_seeded", false)) return
         val embedded = BuildConfig.EMBEDDED_API_KEY

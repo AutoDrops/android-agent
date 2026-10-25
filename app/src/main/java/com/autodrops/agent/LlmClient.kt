@@ -40,6 +40,17 @@ class LlmClient {
         }
     }
 
+    /** OpenAI-compatible /embeddings call for a single input. Returns the raw (un-normalized) vector. */
+    suspend fun embed(base: String, key: String, model: String, input: String): FloatArray = withContext(Dispatchers.IO) {
+        val body = RemoteEmbeddings.buildBody(model, input)
+        http.newCall(req(base, key).url("$base/embeddings")
+            .post(body.toString().toRequestBody("application/json".toMediaType())).build()).execute().use { r ->
+            val txt = r.body?.string() ?: ""
+            if (!r.isSuccessful) throw RuntimeException(ModelValidation.extractError(r.code, txt))
+            RemoteEmbeddings.parse(txt)
+        }
+    }
+
     /** Returns final assistant message JSON. onDelta receives streamed text. */
     suspend fun complete(base: String, key: String, model: String, messages: JSONArray, tools: JSONArray,
                          stream: Boolean, onDelta: (String) -> Unit): JSONObject = withContext(Dispatchers.IO) {

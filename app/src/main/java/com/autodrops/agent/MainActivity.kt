@@ -277,6 +277,18 @@ fun ToolsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Divider(color = MxDim)
         Divider(color = MxDim)
         Text("База знань (локальний RAG)", fontFamily = mono, color = MxGreen)
+        var embRemote by remember { mutableStateOf(vm.store.embeddingRemote) }
+        var embModel by remember { mutableStateOf(vm.store.embeddingModel) }
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(embRemote, { embRemote = it; vm.store.embeddingRemote = it })
+            Text("Віддалені embeddings (OpenRouter / OpenAI-сумісні, твій ключ)", fontSize = 12.sp, fontFamily = mono, color = MxGreen)
+        }
+        if (embRemote) {
+            OutlinedTextField(embModel, { embModel = it; vm.store.embeddingModel = it }, Modifier.fillMaxWidth(),
+                label = { Text("Модель embeddings", fontFamily = mono) }, singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+            Text("Якщо віддалений виклик впаде — автоматично локальний hashing-fallback.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        }
         var ragTitle by remember { mutableStateOf("") }
         var ragBody by remember { mutableStateOf("") }
         val ragDocs by vm.ragDocs().collectAsState(initial = emptyList())
