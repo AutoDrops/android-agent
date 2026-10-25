@@ -6,7 +6,7 @@ import org.json.JSONObject
 /**
  * A downloadable local model entry. [engine] selects the runtime:
  *  - "mediapipe": a MediaPipe LLM Inference .task bundle (REAL on-device generate path, see LocalLlm)
- *  - "gguf": a llama.cpp GGUF file (download/verify works; native inference engine still pending)
+ *  - "gguf": a llama.cpp GGUF file (download/verify + on-device inference via GgufLlm / llama-android AAR)
  * sha256 pins the expected hash for supply-chain protection (empty = TOFU, never auto-selected).
  */
 data class LocalModel(
@@ -21,7 +21,12 @@ data class LocalModel(
     // combined file is then verified against [sha256]. Lets us host >1GB assets as sub-1GB GitHub parts.
     val parts: List<String> = emptyList()
 ) {
-    val isRunnable: Boolean get() = engine == "mediapipe"
+    /** True when this entry can be loaded by an on-device engine linked into THIS build. */
+    val isRunnable: Boolean get() = when (engine) {
+        "mediapipe" -> true  // MediaPipe engine is always linked (see LocalLlm.ENGINE_LINKED)
+        "gguf" -> GgufLlm.ENGINE_LINKED
+        else -> false
+    }
     fun fileName(): String = if (engine == "mediapipe") "$id.task" else "$id.gguf"
     /** The ordered list of URLs to fetch: the multi-part list when set, otherwise the single [url]. */
     fun downloadUrls(): List<String> = if (parts.isNotEmpty()) parts else listOf(url)
@@ -38,7 +43,7 @@ data class LocalModel(
     }
 }
 
-/** Curated catalog of tiny instruct models. MediaPipe .task entries run fully on-device offline. */
+/** Curated catalog of tiny instruct models. MediaPipe .task and (when linked) GGUF entries run on-device. */
 object ModelCatalogLocal {
     val CATALOG: List<LocalModel> = listOf(
         // REAL runnable on-device model (MediaPipe LLM Inference). Free, no auth; SHA-256 pinned.
@@ -65,7 +70,19 @@ object ModelCatalogLocal {
                 "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task.part00",
                 "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task.part01",
                 "https://github.com/AutoDrops/android-agent/releases/download/v3.9/gemma2-2b-it-ablit-int4.task.part02")),
-        // GGUF entries: download+verify real; llama.cpp JNI inference still pending.
+        // GGUF entries: download+verify + on-device inference via llama.cpp AAR (GgufLlm).
+        // «БЕЗ ЦЕНЗУРИ» GGUF: Llama-3.2-1B-Instruct-abliterated Q4_K_M (~912 МБ).
+        // Source: mradermacher/Llama-3.2-1B-Instruct-abliterated-GGUF (HF). Hosted as release asset for stable URL.
+        // HONESTY: SHA-256 pinned; natives arm64-v8a wired+compiled; NOT run on real hardware here (no emulator/KVM).
+        LocalModel(
+            id = "llama32-1b-instruct-ablit-q4",
+            name = "Llama-3.2-1B-Instruct «без цензури» (GGUF Q4_K_M)",
+            url = "https://github.com/AutoDrops/android-agent/releases/download/v3.19/llama32-1b-instruct-ablit-q4.gguf",
+            sizeMb = 912,
+            sha256 = "68336c25367576f49b29f01ee9034658b51bbded6a7f215e934d997de96301e0",
+            engine = "gguf",
+            note = "«Без цензури» (abliterated). Офлайн через llama.cpp, Q4_K_M, ~912 МБ. SHA-256 закріплено. На реальному пристрої не перевірено (немає емулятора в середовищі збірки). Тільки arm64-v8a."),
+        // Small instruct GGUF (HF direct). TOFU hash (empty pin) — never auto-selected for offline chat.
         LocalModel(
             id = "qwen2.5-0.5b-instruct-q4",
             name = "Qwen2.5-0.5B-Instruct (GGUF Q4) — завантаження",
@@ -73,7 +90,7 @@ object ModelCatalogLocal {
             sizeMb = 400,
             sha256 = "",
             engine = "gguf",
-            note = "GGUF; рушій llama.cpp ще в розробці."),
+            note = "GGUF Q4; рушій llama.cpp вшито. SHA не закріплено (TOFU) — не авто-вибір."),
         LocalModel(
             id = "smollm2-360m-instruct-q4",
             name = "SmolLM2-360M-Instruct (GGUF Q4) — завантаження",
@@ -81,7 +98,7 @@ object ModelCatalogLocal {
             sizeMb = 270,
             sha256 = "",
             engine = "gguf",
-            note = "GGUF; рушій llama.cpp ще в розробці.")
+            note = "GGUF Q4; рушій llama.cpp вшито. SHA не закріплено (TOFU) — не авто-вибір.")
     )
     fun byId(id: String) = CATALOG.firstOrNull { it.id == id }
     fun runnable() = CATALOG.filter { it.isRunnable }

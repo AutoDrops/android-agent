@@ -230,3 +230,18 @@ Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; 
   3. **On-device self-test screen** — real checks: API reachability with in-app key (GET /models), local model presence, each runtime-permission status, safe LAN ping of *own* IPv4, TTS readiness. Pass/fail/warn/skip with summary. Read-only / confirmation-safe.
   4. **Permission onboarding** — first-run screen explaining each runtime permission in Ukrainian + request button; re-openable from Settings. `PermissionCatalog` is the pure source for SDK-filtered specs.
 - Gate-not-remove: nothing cut. +12 unit tests (V317Test) for crash formatting, capabilities, self-test modeling, permission mapping. Full suite green. Secret-scan clean; key only build-time via gitignored `local.properties` / `BuildConfig`, never in tracked source.
+
+## v3.18 — DEFER'd quality items + stub audit (2026-10-25)
+- Prompt-length model routing, invalid-tool-JSON self-correction, VAD auto-stop, proactive voice-download prompt. Full stub audit. Gate-not-remove. Secret-scan clean.
+
+## v3.19 — GGUF on-device inference via llama.cpp AAR (2026-10-25)
+- **Gap closed:** GGUF models can now be *loaded and run* on-device, not only downloaded.
+- **Approach:** published Maven AAR `dev.ffmpegkit-maintained:llama-android:0.1.1` (llama.cpp b9878, MIT). No self-built NDK/JNI — reproducible Gradle dep. `net.ladenthin:llama-android:6.0.0` did not resolve here; ffmpegkit-maintained did.
+- **Wiring:**
+  - `GgufLlm` — ensureLoaded / generate / generateStream / unload / status; SHA recheck + GGUF-magic gate; RAM-aware `GgufConfig.choose` (ctx/threads/maxTokens).
+  - `OnDeviceLlm` facade routes by `LocalModel.engine` to MediaPipe (`LocalLlm`) or llama.cpp (`GgufLlm`). AgentViewModel offline chat / self-check / ⚡ button use the facade.
+  - Free AAR has **no token streaming** — `generateStream` delivers the full reply once (honest; same as MediaPipe blocking fallback).
+- **Catalog:** new pinned «без цензури» GGUF — `Llama-3.2-1B-Instruct-abliterated Q4_K_M` (~912 MB, SHA-256 `68336c25…`), hosted as `v3.19` release asset. Existing TOFU GGUF entries kept (manual download only). MediaPipe `.task` path untouched (still default for .task).
+- **ABI:** llama-android ships **arm64-v8a only**; `armeabi-v7a` kept in abiFilters for MediaPipe/Vosk. On 32-bit ARM, GGUF load fails with a clear error.
+- **HONESTY:** natives wired+compiled into APK; generation **not** executed on a physical device in this sandbox (no emulator/KVM). Errors surfaced, never fabricated. Note in UI + catalog.
+- Gate-not-remove. Secret-scan clean. Key only build-time via gitignored `local.properties` / `BuildConfig`. Version 3.18→3.19 (code 22).

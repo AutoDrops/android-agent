@@ -23,7 +23,7 @@ android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 21; versionName = "3.18"
+        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 22; versionName = "3.19"
         buildConfigField("String", "EMBEDDED_API_KEY", "\"${resolveEmbeddedKey()}\"")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -31,6 +31,12 @@ android {
     testOptions { unitTests { isIncludeAndroidResources = true; isReturnDefaultValues = true } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
+    packaging {
+        jniLibs {
+            // llama-android ships libc++_shared; pickFirst keeps the merge deterministic if others appear.
+            pickFirsts += listOf("**/libc++_shared.so")
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -62,6 +68,8 @@ dependencies {
     implementation("com.google.mediapipe:tasks-genai:0.10.24")
     // Offline speech-to-text (downloadable models, not bundled). Native .so via arm-only abiFilters.
     implementation("com.alphacephei:vosk-android:0.3.70")
+    // On-device GGUF inference via llama.cpp (prebuilt AAR, arm64-v8a). No NDK build.
+    implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.12.2")
     testImplementation("androidx.test:core:1.6.1")

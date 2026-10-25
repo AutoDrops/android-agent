@@ -706,8 +706,13 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Divider(color = MxDim)
         // ---- Local SLM: real downloadable model manager ----
         Text("Локальна модель (офлайн)", fontFamily = mono, color = MxGreen)
-        Text(if (vm.engineLinked) "✓ Рушій on-device (MediaPipe) вшито у збірку (native .so). Завантаж .task-модель → кнопка ⚡ у чаті для офлайн-відповіді. Примітка: перша генерація не перевірена на твоєму конкретному пристрої — помилки будуть показані, не приховані." else "Рушій on-device не злінкований у цій збірці.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono)
-        Text("MediaPipe .task-моделі виконуються на пристрої повністю офлайн. GGUF-записи поки лише завантажуються (llama.cpp — у розробці). Усе з перевіркою SHA-256.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
+        Text(when {
+                vm.mediapipeLinked && vm.ggufLinked -> "✓ Рушії вшито: MediaPipe (.task) + llama.cpp/GGUF (arm64-v8a). Завантаж модель → ⚡ у чаті. Перша генерація на твоєму пристрої не перевірена в середовищі збірки — помилки будуть показані."
+                vm.mediapipeLinked -> "✓ Рушій MediaPipe вшито. Завантаж .task-модель → ⚡ у чаті. Перша генерація не перевірена на твоєму пристрої."
+                vm.ggufLinked -> "✓ Рушій llama.cpp (GGUF) вшито (arm64-v8a). Завантаж GGUF → ⚡ у чаті."
+                else -> "Рушій on-device не злінкований у цій збірці."
+            }, fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono)
+        Text("MediaPipe .task і GGUF (llama.cpp) виконуються офлайн на пристрої. Закріплений SHA-256 обовʼязковий для авто-вибору; записи без хеша — лише ручне завантаження (TOFU). GGUF natives: лише arm64-v8a.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
         vm.localModels.forEach { m ->
             val have = vm.isModelDownloaded(m)
             Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
@@ -727,7 +732,7 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         // ---- v3.6: honest on-device self-check ----
         BigButton(if (vm.selfCheckBusy) "Діагностика…" else "Самодіагностика рушія (on-device)", { vm.runSelfCheck() }, enabled = !vm.selfCheckBusy)
         if (vm.selfCheckReport.isNotBlank()) Text(vm.selfCheckReport, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono, fontSize = 10.sp)
-        Text("Чому MediaPipe .task: Google підтримує готовий native-рушій (LLM Inference) з робочим generate() на Android. Самостійна крос-компіляція llama.cpp JNI у цьому середовищі не відтворювана, тож GGUF-шлях лишається документованим планом, а не фейковою генерацією.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
+        Text("v3.19: GGUF увімкнено через готовий Maven AAR (dev.ffmpegkit-maintained:llama-android) — без власної NDK-збірки. MediaPipe .task лишається основним шляхом для .task-бандлів. Обидва рушії злінковані; нативний інференс у середовищі збірки не ганявся (немає KVM/емулятора).", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
         Divider(color = MxDim)
         // ---- v3.6: Vosk offline voice (download on demand, not bundled) ----
         Text("Офлайн-голос (Vosk)", fontFamily = mono, color = MxGreen)

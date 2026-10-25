@@ -268,14 +268,16 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun deleteModel(m: LocalModel) {
-        if (LocalLlm.loadedId == m.id) LocalLlm.unload()
+        if (OnDeviceLlm.loadedId == m.id) OnDeviceLlm.unload()
         modelMgr.delete(m); java.io.File(modelMgr.fileFor(m).parentFile, modelMgr.fileFor(m).name + ".ok").delete()
         if (store.selectedLocalModel == m.id) store.selectedLocalModel = ""; modelStatus = "Видалено ${m.name}."
     }
-    fun localLlmStatus(m: LocalModel) = LocalLlm.status(modelMgr.isDownloaded(m))
+    fun localLlmStatus(m: LocalModel) = OnDeviceLlm.status(m, modelMgr.isDownloaded(m))
 
     // ---- v3.5: real on-device inference (MediaPipe) ----
-    val engineLinked = LocalLlm.ENGINE_LINKED
+    val engineLinked = OnDeviceLlm.anyEngineLinked
+    val mediapipeLinked = LocalLlm.ENGINE_LINKED
+    val ggufLinked = GgufLlm.ENGINE_LINKED
     var localBusy by mutableStateOf(false)
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val llmDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(1)
@@ -284,8 +286,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         val am = getApplication<android.app.Application>().getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
         am.isLowRamDevice
     }.getOrDefault(false)
-    fun stopLocal() { localJob?.cancel(); LocalLlm.unload(); localBusy = false }
-    override fun onCleared() { super.onCleared(); runCatching { LocalLlm.unload() }; runCatching { voice.stop() }; runCatching { speaker.shutdown() } }
+    fun stopLocal() { localJob?.cancel(); OnDeviceLlm.unload(); localBusy = false }
+    override fun onCleared() { super.onCleared(); runCatching { OnDeviceLlm.unload() }; runCatching { voice.stop() }; runCatching { speaker.shutdown() } }
 
     // ---- v3.6: Vosk offline voice ----
     val voskModels = VoskCatalog.CATALOG
@@ -324,17 +326,18 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         selfCheckReport = "Запуск самодіагностики…"
         viewModelScope.launch {
             val sb = StringBuilder()
-            sb.appendLine("Рушій злінкований: " + if (LocalLlm.ENGINE_LINKED) "так (MediaPipe)" else "ні")
+            sb.appendLine("MediaPipe злінкований: " + if (LocalLlm.ENGINE_LINKED) "так" else "ні")
+            sb.appendLine("llama.cpp (GGUF) злінкований: " + if (GgufLlm.ENGINE_LINKED) "так (arm64-v8a)" else "ні")
             val m = runnableModelOnDisk()
-            sb.appendLine("Сумісна .task-модель на диску: " + (m?.name ?: "немає"))
-            if (LocalLlm.ENGINE_LINKED && m != null) {
-                sb.appendLine("Пробна генерація…")
+            sb.appendLine("Сумісна on-device модель на диску: " + (m?.let { "${it.name} [${OnDeviceLlm.engineLabel(it)}]" } ?: "немає"))
+            if (OnDeviceLlm.anyEngineLinked && m != null) {
+                sb.appendLine("Пробна генерація (${OnDeviceLlm.engineLabel(m)})…")
                 val out = kotlinx.coroutines.withContext(llmDispatcher) {
-                    if (!LocalLlm.ensureLoaded(getApplication(), m, modelMgr.fileFor(m))) return@withContext null
-                    LocalLlm.generate("Відповідь одним словом: OK")
+                    if (!OnDeviceLlm.ensureLoaded(getApplication(), m, modelMgr.fileFor(m))) return@withContext null
+                    OnDeviceLlm.generate("Відповідь одним словом: OK")
                 }
                 sb.appendLine(if (out != null) "Результат: " + out.take(200)
-                    else "Генерація не вдалася: " + (LocalLlm.lastError ?: "невідома помилка"))
+                    else "Генерація не вдалася: " + (OnDeviceLlm.lastError ?: "невідома помилка"))
                 sb.appendLine("(Це справжній виклик рушія на цьому пристрої — результат не підроблено.)")
             } else {
                 sb.appendLine("Пробну генерацію пропущено (немає рушія або моделі).")
@@ -344,8 +347,14 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
             selfCheckBusy = false
         }
     }
-    /** The runnable (.task) model currently on disk, if any. */
-    fun runnableModelOnDisk(): LocalModel? = ModelCatalogLocal.runnable().firstOrNull { modelMgr.isDownloaded(it) }
+    /** The runnable on-device model currently on disk (MediaPipe .task or GGUF), if any.
+     * Prefers a pinned-SHA model; MediaPipe first, then GGUF. */
+    fun runnableModelOnDisk(): LocalModel? {
+        val onDisk = ModelCatalogLocal.runnable().filter { modelMgr.isDownloaded(it) }
+        return onDisk.firstOrNull { it.engine == "mediapipe" && it.sha256.isNotBlank() }
+            ?: onDisk.firstOrNull { it.engine == "gguf" && it.sha256.isNotBlank() }
+            ?: onDisk.firstOrNull()
+    }
     fun localReady(): Boolean = engineLinked && runnableModelOnDisk() != null
     fun isOnline(): Boolean = runCatching {
         val cm = getApplication<android.app.Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -357,23 +366,24 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     /** Run a genuine on-device generation and append it to the chat. Honest about unverified/native errors. */
     fun askLocal(text: String) {
         val t = text.trim(); if (t.isEmpty() || localBusy) return
-        val m = runnableModelOnDisk() ?: run { add("assistant", LocalLlm.offlineFallback()); return }
+        val m = runnableModelOnDisk() ?: run { add("assistant", OnDeviceLlm.offlineFallback()); return }
         add("user", t)
         localBusy = true
-        val holder = add("assistant", "⏳ Локальна генерація (MediaPipe)…")
+        val label = OnDeviceLlm.engineLabel(m)
+        val holder = add("assistant", "⏳ Локальна генерація ($label)…")
         viewModelScope.launch {
             val acc = StringBuilder()
             val out = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                if (!LocalLlm.ensureLoaded(getApplication(), m, modelMgr.fileFor(m))) return@withContext null
-                // v3.9: stream partial tokens into the chat bubble as they arrive (sync fallback inside).
-                LocalLlm.generateStream(t) { part ->
+                if (!OnDeviceLlm.ensureLoaded(getApplication(), m, modelMgr.fileFor(m))) return@withContext null
+                // Stream when the backend supports it; GGUF free AAR delivers full text once (honest).
+                OnDeviceLlm.generateStream(t) { part ->
                     acc.append(part)
                     viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
                         val j = items.indexOf(holder); if (j >= 0) items[j] = holder.copy(text = acc.toString())
                     }
                 }
             }
-            val reply = out ?: "Локальна генерація не вдалася: ${LocalLlm.lastError ?: "невідома помилка"}"
+            val reply = out ?: "Локальна генерація не вдалася: ${OnDeviceLlm.lastError ?: "невідома помилка"}"
             val i = items.indexOf(holder); if (i >= 0) items[i] = holder.copy(text = reply)
             localBusy = false
         }

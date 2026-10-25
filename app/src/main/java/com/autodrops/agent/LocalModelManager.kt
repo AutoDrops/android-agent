@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 /**
  * REAL downloadable-model manager: downloads a GGUF file to app-private storage, streams it to disk,
  * computes SHA-256 and (when an expected hash is known) verifies it before marking the file usable.
- * Inference itself (llama.cpp JNI) is PENDING — see LocalLlm. We never pretend to run a model we can't.
+ * GGUF inference is handled by GgufLlm (llama.cpp AAR). This manager only downloads+verifies.
  */
 class LocalModelManager(private val ctx: Context) {
     private val http = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
@@ -116,7 +116,7 @@ object LocalLlm {
     @Synchronized
     fun ensureLoaded(ctx: Context, model: LocalModel, file: File, expectedSha: String = model.sha256, maxTokens: Int = 512): Boolean {
         if (!ENGINE_LINKED) { lastError = "MediaPipe-рушій не злінкований у збірці."; return false }
-        if (!model.isRunnable) { lastError = "Модель ${model.id} не сумісна з on-device рушієм (.task потрібен)."; return false }
+        if (model.engine != "mediapipe") { lastError = "Модель ${model.id} не сумісна з MediaPipe (.task потрібен; GGUF → GgufLlm)."; return false }
         if (!file.exists() || file.length() < 1024) { lastError = "Файл моделі відсутній."; return false }
         if (engine != null && loadedModelId == model.id) return true
         // Integrity recheck before loading (defends against post-download tampering). Cached via .ok marker.
@@ -198,7 +198,7 @@ object LocalLlm {
 
     fun status(modelDownloaded: Boolean): String = when {
         !ENGINE_LINKED -> "Рушій on-device інференсу не злінкований у цій збірці."
-        !modelDownloaded -> "Рушій MediaPipe вшито. Завантаж сумісну .task-модель, щоб працювати офлайн."
+        !modelDownloaded -> "Рушій MediaPipe вшито. Завантаж сумісну .task-модель (або GGUF через llama.cpp), щоб працювати офлайн."
         isLoaded -> "Локальна модель завантажена та готова (MediaPipe, on-device)."
         lastError != null -> "Рушій вшито, модель на диску. Остання помилка: $lastError"
         else -> "Рушій MediaPipe вшито, модель на диску. Перша генерація не перевірена на твоєму пристрої — можливі помилки, вони будуть показані."

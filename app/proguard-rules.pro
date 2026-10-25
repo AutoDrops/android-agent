@@ -8,3 +8,7 @@
 -keep class com.sun.jna.** { *; }
 -dontwarn com.sun.jna.**
 -dontwarn org.vosk.**
+
+# v3.19: llama.cpp GGUF engine (ffmpegkit-maintained AAR)
+-keep class dev.ffmpegkit.llama.** { *; }
+-dontwarn dev.ffmpegkit.llama.**
