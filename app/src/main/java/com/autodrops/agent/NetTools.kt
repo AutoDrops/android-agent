@@ -196,6 +196,8 @@ object Lan {
     /** nmap -A style: TTL-based OS guess for one host plus banner-grab service/version on open common ports. RFC1918-gated by caller. */
     suspend fun osServiceDetect(host: String): String = withContext(Dispatchers.IO) {
         val target = NetGuard.resolveV4(host) ?: return@withContext "не вдалося розв'язати $host"
+        // Defense-in-depth: re-verify the RESOLVED ip is private at point-of-use (guards against DNS-rebinding/TOCTOU between the caller's guard() and this live probe).
+        if (!NetGuard.isPrivateV4(target)) return@withContext "Відхилено: $host розв'язався у публічну адресу $target. Лише RFC1918/локальна мережа."
         val sb = StringBuilder("nmap -A (локально) для $host ($target):\n")
         val ping = runCatching {
             val p = ProcessBuilder("ping", "-c", "1", "-W", "2", target).redirectErrorStream(true).start()
@@ -348,8 +350,13 @@ object OuiStore {
                 val conn = (java.net.URL(URL).openConnection() as java.net.HttpURLConnection).apply {
                     connectTimeout = 8000; readTimeout = 20000
                 }
-                val txt = conn.inputStream.bufferedReader().use { it.readText() }
-                if (txt.length > 1000) { f.writeText(txt); merged = NetScan.BUILTIN_OUI + NetScan.parseOuiCsv(txt) }
+                // Cap the download so a malicious/huge mirror cannot OOM the device (IEEE oui.csv is ~4-5 MB).
+                val txt = conn.inputStream.bufferedReader().use { r ->
+                    val cap = 24 * 1024 * 1024; val sb = StringBuilder(); val buf = CharArray(16384); var total = 0
+                    while (true) { val n = r.read(buf); if (n < 0) break; total += n; if (total > cap) break; sb.append(buf, 0, n) }
+                    sb.toString()
+                }
+                if (txt.length in 1001..(24 * 1024 * 1024)) { f.writeText(txt); merged = NetScan.BUILTIN_OUI + NetScan.parseOuiCsv(txt) }
             }
         }
         cache = merged
