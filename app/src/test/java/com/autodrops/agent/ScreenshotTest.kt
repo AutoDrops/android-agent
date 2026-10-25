@@ -6,6 +6,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -172,6 +179,30 @@ class ScreenshotTest {
                     Text("~270 МБ · GGUF; рушій llama.cpp ще в розробці", color = G.copy(alpha=.6f), fontFamily = mono, fontSize = 10.sp)
                     Btn("Завантажити", Modifier.padding(top=4.dp))
                 }
+            }
+        }
+    }
+
+    // --- v3.20: render the REAL production composables as pixel proof ---
+    @Test fun permissionsWelcome() = paparazzi.snapshot {
+        MaterialTheme(colorScheme = darkColorScheme(primary = G, background = BG, surface = Color(0xFF0C1E12), onSurface = G, onBackground = G)) {
+            Surface(Modifier.fillMaxSize(), color = BG) {
+                OnboardingContent(
+                    perms = listOf(
+                        PermRow("Місцезнаходження", "Потрібно для сканування Wi-Fi і пошуку пристроїв у твоїй мережі.", true),
+                        PermRow("Контакти", "Щоб агент міг знаходити контакти на твій запит.", false),
+                        PermRow("Мікрофон", "Голосовий ввід (офлайн Vosk або системний STT).", false),
+                        PermRow("SMS", "Читання/надсилання SMS на твій запит (надсилання — з підтвердженням).", false)),
+                    askPerms = {}, onDone = {})
+            }
+        }
+    }
+    @Test fun bottomBar() = paparazzi.snapshot {
+        MaterialTheme(colorScheme = darkColorScheme(primary = G, background = BG, surface = Color(0xFF0C1E12), onSurface = G, onBackground = G)) {
+            Surface(color = BG) {
+                val tabs = listOf("Чат" to Icons.Default.Chat, "Моделі" to Icons.Default.Memory, "Засоби" to Icons.Default.Build,
+                    "Код" to Icons.Default.Code, "Мережа" to Icons.Default.Wifi, "Налашт." to Icons.Default.Settings)
+                BottomNavBar(tabs, 0) {}
             }
         }
     }

@@ -245,3 +245,12 @@ Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; 
 - **ABI:** llama-android ships **arm64-v8a only**; `armeabi-v7a` kept in abiFilters for MediaPipe/Vosk. On 32-bit ARM, GGUF load fails with a clear error.
 - **HONESTY:** natives wired+compiled into APK; generation **not** executed on a physical device in this sandbox (no emulator/KVM). Errors surfaced, never fabricated. Note in UI + catalog.
 - Gate-not-remove. Secret-scan clean. Key only build-time via gitignored `local.properties` / `BuildConfig`. Version 3.18→3.19 (code 22).
+
+## v3.20 — UI repair (first real-device feedback)
+- Root cause of Bohdan's "unreadable" first-run screen: onboarding + all screens had transparent backgrounds over a full-screen MatrixRain + a transparent Scaffold, so the Chat tab behind it (its model indicator "claude-haiku-5.5") and the Matrix rain bled through, and text ghosted ("drawn multiple times") because transparent layers don't clear on redraw.
+- Fix: solid near-black opaque app bg (MxBg) on Box/Scaffold/content host; MatrixRain removed from behind content, kept ONLY behind the Chat empty-state (no body text) under a 72% solid scrim, still toggleable.
+- Onboarding refactored to stateless OnboardingContent(List<PermRow>) — opaque bg, opaque bordered cards (MxCardColors/MxCardBorder), high-contrast status pills (✓ НАДАНО / ○ НІ).
+- Opaque card color MxCard + visible MxBorder applied to all cards; high-contrast green on/off mxSwitchColors() on every Switch.
+- Bottom nav extracted to BottomNavBar, alwaysShowLabel=true, explicit green label colors, Ukrainian labels under icons (long ones shortened: Засоби, Код) so all 6 fit.
+- "claude-haiku-5.5" was NOT a baked watermark/key — it was the Chat header model indicator showing through the transparent overlay; no model slug or key is drawn anywhere (only MatrixRain glyphs). Secret scan clean.
+- Proof: Paparazzi renders of REAL OnboardingContent (permissionsWelcome) and REAL BottomNavBar (bottomBar) added + inspected; 235 unit/screenshot tests green. Codex (openai/gpt-5.3-codex) reviewed the diff: no regressions.

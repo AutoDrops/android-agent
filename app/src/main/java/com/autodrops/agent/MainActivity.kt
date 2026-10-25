@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,8 +38,21 @@ import kotlinx.coroutines.launch
 
 private val MxGreen = Color(0xFF00FF66)
 private val MxDim = Color(0xFF0A3A1A)
-private val MxBg = Color(0xFF000000)
+private val MxBg = Color(0xFF050A07)        // solid near-black app background
+private val MxCard = Color(0xFF0C1E12)      // opaque card surface (high enough contrast vs bg)
+private val MxBorder = Color(0xFF1F6B3A)    // visible card/control border
 private val mono = FontFamily.Monospace
+
+/** High-contrast green on/off switch used across all screens. */
+@Composable
+fun mxSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = MxBg, checkedTrackColor = MxGreen, checkedBorderColor = MxGreen,
+    uncheckedThumbColor = MxGreen, uncheckedTrackColor = MxCard, uncheckedBorderColor = MxGreen.copy(alpha = 0.6f))
+
+/** Opaque, bordered card so content never blends into the background. */
+@Composable
+fun MxCardColors() = CardDefaults.cardColors(containerColor = MxCard)
+val MxCardBorder @Composable get() = androidx.compose.foundation.BorderStroke(1.dp, MxBorder)
 
 class MainActivity : ComponentActivity() {
     private val perms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
@@ -49,7 +63,7 @@ class MainActivity : ComponentActivity() {
         val tileAction = intent?.getStringExtra("tile_action")
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = MxGreen, secondary = MxGreen, background = MxBg,
-                surface = Color(0xFF07140C), onPrimary = MxBg, onSurface = MxGreen, onBackground = MxGreen)) {
+                surface = MxCard, onPrimary = MxBg, onSurface = MxGreen, onBackground = MxGreen)) {
                 Surface(Modifier.fillMaxSize(), color = MxBg) { Root(shared = shared, tileAction = tileAction) { askPerms() } }
             }
         }
@@ -79,21 +93,11 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, tileAction: String? 
         }
     }
     LaunchedEffect(Unit) { vm.loadCatalog() }
-    val tabs = listOf("Чат" to Icons.Default.Chat, "Моделі" to Icons.Default.Memory, "Інструменти" to Icons.Default.Build,
-        "Термінал/Код" to Icons.Default.Code, "Мережа" to Icons.Default.Wifi, "Налашт." to Icons.Default.Settings)
-    Box(Modifier.fillMaxSize()) {
-        MatrixRain(vm.matrixRain, Modifier.fillMaxSize())
-        Scaffold(containerColor = Color.Transparent, bottomBar = {
-            NavigationBar(containerColor = Color(0xFF04120A)) {
-                tabs.forEachIndexed { i, (label, icon) ->
-                    NavigationBarItem(selected = tab == i, onClick = { tab = i },
-                        icon = { Icon(icon, label, tint = if (tab == i) MxGreen else MxGreen.copy(alpha = 0.5f)) },
-                        label = { Text(label, fontSize = 9.sp, fontFamily = mono) },
-                        colors = NavigationBarItemDefaults.colors(indicatorColor = MxDim))
-                }
-            }
-        }) { pad ->
-            Box(Modifier.padding(pad)) {
+    val tabs = listOf("Чат" to Icons.Default.Chat, "Моделі" to Icons.Default.Memory, "Засоби" to Icons.Default.Build,
+        "Код" to Icons.Default.Code, "Мережа" to Icons.Default.Wifi, "Налашт." to Icons.Default.Settings)
+    Box(Modifier.fillMaxSize().background(MxBg)) {
+        Scaffold(containerColor = MxBg, bottomBar = { BottomNavBar(tabs, tab) { tab = it } }) { pad ->
+            Box(Modifier.padding(pad).fillMaxSize().background(MxBg)) {
                 when (tab) {
                     0 -> ChatTab(vm, onOpenModels = { tab = 1 }, onPalette = { palette = true }); 1 -> ModelsTab(vm) { tab = 0 }; 2 -> ToolsTab(vm, askPerms)
                     3 -> DevTab(vm); 4 -> NetworkTab(vm); else -> SettingsTab(vm, askPerms)
@@ -105,7 +109,7 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, tileAction: String? 
     if (showOnboarding) OnboardingScreen(vm, askPerms, onDone = { vm.markOnboardingDone(); showOnboarding = false })
     if (palette) CommandPalette(vm, onDismiss = { palette = false }, onNav = { tab = it; palette = false })
     vm.pending?.let { p ->
-        AlertDialog(onDismissRequest = {}, containerColor = Color(0xFF07140C), titleContentColor = MxGreen, textContentColor = MxGreen,
+        AlertDialog(onDismissRequest = {}, containerColor = MxCard, titleContentColor = MxGreen, textContentColor = MxGreen,
             icon = { Icon(Icons.Default.Warning, null, tint = MxGreen) },
             title = { Text("Підтвердити: ${p.name}  [${p.risk}]", fontFamily = mono) },
             text = { Column {
@@ -118,6 +122,21 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, tileAction: String? 
             } },
             confirmButton = { Button(onClick = { vm.resolvePending(true) }, colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Text("Дозволити") } },
             dismissButton = { TextButton(onClick = { vm.resolvePending(false) }) { Text("Відхилити", color = MxGreen) } })
+    }
+}
+
+@Composable
+fun BottomNavBar(tabs: List<Pair<String, androidx.compose.ui.graphics.vector.ImageVector>>, selected: Int, onSelect: (Int) -> Unit) {
+    NavigationBar(containerColor = Color(0xFF04120A), tonalElevation = 0.dp) {
+        tabs.forEachIndexed { i, (label, icon) ->
+            NavigationBarItem(selected = selected == i, onClick = { onSelect(i) }, alwaysShowLabel = true,
+                icon = { Icon(icon, label, tint = if (selected == i) MxGreen else MxGreen.copy(alpha = 0.6f)) },
+                label = { Text(label, fontSize = 10.sp, fontFamily = mono, maxLines = 1) },
+                colors = NavigationBarItemDefaults.colors(
+                    indicatorColor = MxDim,
+                    selectedIconColor = MxGreen, unselectedIconColor = MxGreen.copy(alpha = 0.6f),
+                    selectedTextColor = MxGreen, unselectedTextColor = MxGreen.copy(alpha = 0.7f)))
+        }
     }
 }
 
@@ -141,13 +160,19 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
             Text("▾ ${vm.store.model.substringAfterLast('/')}", Modifier.clickable { onOpenModels() }, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp)
         }
         PlanPanel()
-        if (vm.items.isEmpty()) Box(Modifier.weight(1f)) { Empty("> Запитай агента: переглянь телефон, скануй мережу, знайди ТВ або напиши й запусти код.") }
+        if (vm.items.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (vm.matrixRain) {
+                MatrixRain(true, Modifier.matchParentSize())
+                Box(Modifier.matchParentSize().background(MxBg.copy(alpha = 0.72f)))
+            }
+            Empty("> Запитай агента: переглянь телефон, скануй мережу, знайди ТВ або напиши й запусти код.")
+        }
         else LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), reverseLayout = true) {
             items(vm.items.reversed(), key = { it.id }) { m ->
                 if (m.card != null) ToolCardView(m.card)
                 else if (m.role == "error") ErrorCard(m.text)
                 else {
-                    val bg = when (m.role) { "user" -> Color(0xFF0B2A16); "info" -> Color(0xFF2A2A0E); else -> Color(0xFF07140C) }
+                    val bg = when (m.role) { "user" -> Color(0xFF0B2A16); "info" -> Color(0xFF2A2A0E); else -> MxCard }
                     Column {
                         SelectionContainer { Text(m.text.ifBlank { "…" }, Modifier.fillMaxWidth().background(bg, RoundedCornerShape(8.dp)).padding(10.dp), fontSize = 15.sp, color = MxGreen, fontFamily = mono) }
                         m.usage?.let { Text(it.label(), color = MxGreen.copy(alpha = 0.5f), fontFamily = mono, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, top = 2.dp)) }
@@ -164,7 +189,7 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
             listening = true
             vm.startVoice(onPartial = { input = it }, onFinal = { input = it; listening = false }, onError = { msg -> listening = false; vm.addInfo("Мікрофон: $msg") })
         }
-        if (offerVoiceDl && selVosk != null) AlertDialog(onDismissRequest = { offerVoiceDl = false }, containerColor = Color(0xFF07140C), textContentColor = MxGreen,
+        if (offerVoiceDl && selVosk != null) AlertDialog(onDismissRequest = { offerVoiceDl = false }, containerColor = MxCard, textContentColor = MxGreen,
             title = { Text("Офлайн-голос", fontFamily = mono, color = MxGreen) },
             text = { Text(VoicePrompt.offerMessage(selVosk.name), fontFamily = mono, fontSize = 12.sp) },
             confirmButton = { Button(onClick = { offerVoiceDl = false; vm.downloadVosk(selVosk) }, colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Text("Завантажити") } },
@@ -192,7 +217,7 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
 
 @Composable
 fun ToolCardView(card: ToolCard) {
-    val color = when (card.status) { "done" -> Color(0xFF0B2A16); "denied" -> Color(0xFF3A0E0E); "awaiting approval" -> Color(0xFF2A2A0E); else -> Color(0xFF07140C) }
+    val color = when (card.status) { "done" -> Color(0xFF0B2A16); "denied" -> Color(0xFF3A0E0E); "awaiting approval" -> Color(0xFF2A2A0E); else -> MxCard }
     Column(Modifier.fillMaxWidth().background(color, RoundedCornerShape(8.dp)).padding(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (card.status == "running" || card.status == "awaiting approval") CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = MxGreen)
@@ -241,7 +266,7 @@ fun ModelsTab(vm: AgentViewModel, onPicked: () -> Unit) {
             items(list, key = { it.id }) { m ->
                 // One tap: set active model and go to Chat. Long-press (info ▸) toggles the full description.
                 Card(Modifier.fillMaxWidth().clickable { vm.store.model = m.id; onPicked() },
-                    colors = CardDefaults.cardColors(containerColor = if (m.id == vm.store.model) Color(0xFF0B2A16) else Color(0xFF07140C))) {
+                    colors = CardDefaults.cardColors(containerColor = if (m.id == vm.store.model) Color(0xFF0B2A16) else MxCard), border = MxCardBorder) {
                     Column(Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(m.id, Modifier.weight(1f), fontSize = 16.sp, color = MxGreen, fontFamily = mono)
@@ -397,7 +422,7 @@ fun ToolsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Divider(color = MxDim)
         Text("Рецепти (збережені запити)", fontFamily = mono, color = MxGreen)
         if (recipes.isEmpty()) Text("Поки немає. Збережи запит із чату.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
-        recipes.forEach { r -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+        recipes.forEach { r -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MxCard), border = MxCardBorder) {
             Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text(r.name, color = MxGreen, fontFamily = mono, fontSize = 13.sp); Text(r.prompt.take(60), color = MxGreen.copy(alpha = 0.6f), fontSize = 10.sp, fontFamily = mono) }
                 TextButton(onClick = { vm.send(r.prompt) }) { Text("▶", color = MxGreen) }
@@ -474,7 +499,7 @@ fun DevTab(vm: AgentViewModel) {
             vm.lastExitCode?.let { ec ->
                 val okc = ec == 0
                 Text("exit $ec", fontSize = 11.sp, fontFamily = mono, color = if (okc) MxGreen else Color(0xFFFF6E6E),
-                    modifier = Modifier.background(Color(0xFF07140C)).padding(horizontal = 6.dp, vertical = 2.dp))
+                    modifier = Modifier.background(MxCard).padding(horizontal = 6.dp, vertical = 2.dp))
             }
         }
         // Saved snippets: tap to run, long-press ✕ to delete
@@ -483,7 +508,7 @@ fun DevTab(vm: AgentViewModel) {
             items(snips, key = { it.first }) { (name, c) ->
                 AssistChip(onClick = { cmd = c }, label = { Text(name, fontFamily = mono, fontSize = 11.sp) },
                     trailingIcon = { Text("✕", color = MxGreen.copy(alpha = 0.6f), modifier = Modifier.clickable { vm.deleteSnippet(name) }) },
-                    colors = AssistChipDefaults.assistChipColors(containerColor = Color(0xFF07140C), labelColor = MxGreen))
+                    colors = AssistChipDefaults.assistChipColors(containerColor = MxCard, labelColor = MxGreen))
             }
         }
         SelectionContainer { Text(term.ifBlank { "> вивід тут." }, Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).background(Color(0xFF02060300)).padding(6.dp),
@@ -546,7 +571,7 @@ fun NetworkTab(vm: AgentViewModel) {
         }, Modifier.fillMaxWidth())
         Text("Приймаються лише приватні адреси (RFC1918). Агент теж може наповнювати інвентар через inventory_add.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
         if (devices.isEmpty()) Text("Інвентар порожній.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
-        devices.forEach { d -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+        devices.forEach { d -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MxCard), border = MxCardBorder) {
             Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(if (d.label.isBlank()) d.ip else "${d.label}", color = MxGreen, fontFamily = mono, fontSize = 14.sp)
@@ -589,9 +614,9 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
             BigButton("Самотест пристрою", { sub = "selftest" }, Modifier.weight(1f))
         }
         BigButton("Екран дозволів (онбординг)", { showOb = true }, Modifier.fillMaxWidth())
-        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.matrixRain, { vm.toggleMatrixRain(it) }); Text("Matrix «цифровий дощ»", color = MxGreen, fontFamily = mono) }
-        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.stream, { vm.store.stream = it }); Text("Потокові відповіді (stream)", color = MxGreen, fontFamily = mono) }
-        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.speakReplies, { vm.store.speakReplies = it }); Text("Озвучувати відповіді (TTS, укр.)", color = MxGreen, fontFamily = mono) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.matrixRain, { vm.toggleMatrixRain(it) }, colors = mxSwitchColors()); Text("Matrix «цифровий дощ»", color = MxGreen, fontFamily = mono) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.stream, { vm.store.stream = it }, colors = mxSwitchColors()); Text("Потокові відповіді (stream)", color = MxGreen, fontFamily = mono) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.speakReplies, { vm.store.speakReplies = it }, colors = mxSwitchColors()); Text("Озвучувати відповіді (TTS, укр.)", color = MxGreen, fontFamily = mono) }
         Text("Мова: українська (типово), англійська доступна у системних налаштуваннях.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
         Divider(color = MxDim)
         Text("Виконання shell", fontFamily = mono, color = MxGreen)
@@ -650,7 +675,7 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         if (rules.isEmpty()) Text("Немає правил.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
         rules.forEach { r -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("• ${r.name} [${r.trigger}${if (r.param.isNotBlank()) ":" + r.param else ""}→${r.action}]", Modifier.weight(1f), color = MxGreen.copy(alpha = if (r.enabled) 0.85f else 0.4f), fontSize = 12.sp, fontFamily = mono)
-            Switch(r.enabled, { on -> vm.setRuleEnabled(r.id, on) })
+            Switch(r.enabled, { on -> vm.setRuleEnabled(r.id, on) }, colors = mxSwitchColors())
             TextButton(onClick = { vm.deleteRule(r.id) }) { Text("✕", color = MxGreen) }
         } }
         Divider(color = MxDim)
@@ -658,11 +683,11 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Text("Фоновий моніторинг мережі (LAN watch)", fontFamily = mono, color = MxGreen)
         var confirmLan by remember { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(vm.store.lanWatchEnabled, { on -> if (on) confirmLan = true else vm.setLanWatch(false) })
+            Switch(vm.store.lanWatchEnabled, { on -> if (on) confirmLan = true else vm.setLanWatch(false) }, colors = mxSwitchColors())
             Text("Перевіряти інвентар кожні ~15 хв і сповіщати про нові/зниклі пристрої", color = MxGreen, fontFamily = mono, fontSize = 12.sp)
         }
         Text("Пінгує ЛИШЕ збережені приватні IP (RFC1918). Результати НЕ надсилаються у хмарну модель — тільки локальні сповіщення.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
-        if (confirmLan) AlertDialog(onDismissRequest = { confirmLan = false }, containerColor = Color(0xFF07140C), textContentColor = MxGreen,
+        if (confirmLan) AlertDialog(onDismissRequest = { confirmLan = false }, containerColor = MxCard, textContentColor = MxGreen,
             title = { Text("Увімкнути LAN-моніторинг?", fontFamily = mono, color = MxGreen) },
             text = { Text("Фонове завдання періодично пінгуватиме твої збережені приватні IP і надсилатиме локальні сповіщення про зміни. Нічого не йде у хмару.", fontFamily = mono, fontSize = 12.sp) },
             confirmButton = { Button(onClick = { vm.setLanWatch(true); confirmLan = false }, colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Text("Увімкнути") } },
@@ -683,7 +708,7 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
             val enabled = name !in vm.store.disabledTools
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text(name, color = MxGreen, fontFamily = mono, fontSize = 12.sp); Text(risk.name, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono, fontSize = 9.sp) }
-                Switch(enabled, { vm.toggleTool(name, it) })
+                Switch(enabled, { vm.toggleTool(name, it) }, colors = mxSwitchColors())
             }
         }
         Divider(color = MxDim)
@@ -694,7 +719,7 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         var largeM by remember { mutableStateOf(vm.store.routingLargeModel) }
         var threshStr by remember { mutableStateOf(vm.store.routingThresholdChars.toString()) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(routeOn, { routeOn = it; vm.store.routingEnabled = it })
+            Switch(routeOn, { routeOn = it; vm.store.routingEnabled = it }, colors = mxSwitchColors())
             Text(if (routeOn) "Увімкнено: короткі → мала модель, довгі → сильна" else "Вимкнено (завжди обрана модель)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
         }
         if (routeOn) {
@@ -715,7 +740,7 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Text("MediaPipe .task і GGUF (llama.cpp) виконуються офлайн на пристрої. Закріплений SHA-256 обовʼязковий для авто-вибору; записи без хеша — лише ручне завантаження (TOFU). GGUF natives: лише arm64-v8a.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
         vm.localModels.forEach { m ->
             val have = vm.isModelDownloaded(m)
-            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = MxCard), border = MxCardBorder) {
                 Column(Modifier.padding(10.dp)) {
                     Text(m.name, color = MxGreen, fontFamily = mono, fontSize = 13.sp)
                     Text("~${m.sizeMb} МБ · ${m.note}", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
@@ -738,22 +763,22 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Text("Офлайн-голос (Vosk)", fontFamily = mono, color = MxGreen)
         Text("Завантаж модель Vosk на вимогу — у APK вона не вшита. Push-to-talk використовує Vosk офлайн, коли модель є; інакше — системний розпізнавач. Активний: ${vm.voiceEngineLabel()}.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(vm.voskEnabled(), { vm.setVoskEnabled(it) })
+            Switch(vm.voskEnabled(), { vm.setVoskEnabled(it) }, colors = mxSwitchColors())
             Text(if (vm.voskEnabled()) "Vosk увімкнено" else "Vosk вимкнено (системний STT)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(vm.voskStrict(), { vm.setVoskStrict(it) })
+            Switch(vm.voskStrict(), { vm.setVoskStrict(it) }, colors = mxSwitchColors())
             Text("Строгий офлайн (не передавати аудіо системному розпізнавачу)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
         }
         var vadOn by remember { mutableStateOf(vm.store.vadAutoStop) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(vadOn, { vadOn = it; vm.store.vadAutoStop = it })
+            Switch(vadOn, { vadOn = it; vm.store.vadAutoStop = it }, colors = mxSwitchColors())
             Text("Авто-стоп за тишею (VAD) — завершувати запис після паузи", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
         }
         vm.voskModels.forEach { m ->
             val have = vm.voskInstalled(m)
             val sel = vm.voskSelected() == m.id
-            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp), colors = CardDefaults.cardColors(containerColor = MxCard), border = MxCardBorder) {
                 Column(Modifier.padding(10.dp)) {
                     Text((if (sel) "● " else "○ ") + m.name, color = MxGreen, fontFamily = mono, fontSize = 13.sp)
                     Text("~${m.sizeMb} МБ · ${m.note}", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
@@ -789,7 +814,7 @@ private fun runCommandFor(path: String): String = when {
 fun PlanPanel() {
     val steps = AgentPlan.steps
     if (steps.isEmpty()) return
-    Column(Modifier.fillMaxWidth().background(Color(0xFF07140C), RoundedCornerShape(8.dp)).padding(8.dp)) {
+    Column(Modifier.fillMaxWidth().background(MxCard, RoundedCornerShape(8.dp)).padding(8.dp)) {
         Text("▸ План агента", color = MxGreen, fontFamily = mono, fontSize = 12.sp)
         steps.forEachIndexed { i, st ->
             val mark = when (st.status) { "done" -> "✓"; "running" -> "⏵"; "failed" -> "✗"; else -> "•" }
@@ -835,7 +860,7 @@ fun CommandPalette(vm: AgentViewModel, onDismiss: () -> Unit, onNav: (Int) -> Un
         "Увімкнути «чат з нотатками»" to { vm.ragEnabled = true; onNav(0) },
     )
     val filtered = actions.filter { it.first.contains(q, true) }
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Color(0xFF07140C), textContentColor = MxGreen,
+    AlertDialog(onDismissRequest = onDismiss, containerColor = MxCard, textContentColor = MxGreen,
         title = { Text("Командна палітра", fontFamily = mono, color = MxGreen) },
         text = { Column {
             OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("фільтр…", fontFamily = mono) },
@@ -852,25 +877,40 @@ fun CommandPalette(vm: AgentViewModel, onDismiss: () -> Unit, onNav: (Int) -> Un
 @Composable
 fun OnboardingScreen(vm: AgentViewModel, askPerms: () -> Unit, onDone: () -> Unit) {
     val ctx = LocalContext.current
-    val perms = PermissionCatalog.forThisDevice()
-    Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val perms = PermissionCatalog.forThisDevice().map { PermRow(it.uaName, it.rationale, Perms.has(ctx, it.permission)) }
+    OnboardingContent(perms, askPerms, onDone)
+}
+
+/** Stateless onboarding row model so the screen can be rendered in screenshot tests. */
+data class PermRow(val name: String, val rationale: String, val granted: Boolean)
+
+@Composable
+fun OnboardingContent(perms: List<PermRow>, askPerms: () -> Unit, onDone: () -> Unit) {
+    // Opaque background: nothing (Matrix rain / chat content) bleeds through the onboarding overlay.
+    Column(Modifier.fillMaxSize().background(MxBg).systemBarsPadding().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Head("Ласкаво просимо до DRON.exe")
         Text("Щоб інструменти працювали на твоєму телефоні, надай дозволи нижче. Усе небезпечне все одно проходить підтвердження в застосунку. Нічого не надсилається, окрім твого API-провайдера.",
-            color = MxGreen.copy(alpha = 0.75f), fontFamily = mono, fontSize = 12.sp)
+            color = MxGreen.copy(alpha = 0.85f), fontFamily = mono, fontSize = 12.sp)
         perms.forEach { p ->
-            val granted = Perms.has(ctx, p.permission)
-            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
-                Column(Modifier.padding(10.dp)) {
+            Card(Modifier.fillMaxWidth(), colors = MxCardColors(), border = MxCardBorder) {
+                Column(Modifier.padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(p.uaName, Modifier.weight(1f), color = MxGreen, fontFamily = mono, fontSize = 14.sp)
-                        Text(if (granted) "✓ надано" else "○ ні", color = if (granted) MxGreen else Color(0xFFFFC107), fontFamily = mono, fontSize = 12.sp)
+                        Text(p.name, Modifier.weight(1f), color = MxGreen, fontFamily = mono, fontSize = 15.sp)
+                        // Clear, high-contrast status pill instead of a faint glyph.
+                        val pillBg = if (p.granted) MxGreen else Color(0xFF2A2A0E)
+                        val pillFg = if (p.granted) MxBg else Color(0xFFFFC107)
+                        Text(if (p.granted) "✓ НАДАНО" else "○ НІ",
+                            color = pillFg, fontFamily = mono, fontSize = 12.sp,
+                            modifier = Modifier.background(pillBg, RoundedCornerShape(6.dp))
+                                .border(1.dp, if (p.granted) MxGreen else Color(0xFFFFC107), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp))
                     }
-                    Text(p.rationale, color = MxGreen.copy(alpha = 0.65f), fontFamily = mono, fontSize = 11.sp)
+                    Text(p.rationale, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
                 }
             }
         }
         Text("Деякі можливості потребують спеціального доступу (Accessibility, Слухач сповіщень, Запис екрана) — їх можна увімкнути на вкладці «Інструменти».",
-            color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 11.sp)
+            color = MxGreen.copy(alpha = 0.7f), fontFamily = mono, fontSize = 11.sp)
         BigButton("Надати runtime-дозволи", askPerms, Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BigButton("Пропустити", onDone, Modifier.weight(1f))
@@ -893,7 +933,7 @@ fun CapabilitiesScreen(vm: AgentViewModel, onBack: () -> Unit) {
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(filtered, key = { it.name }) { c ->
                 val disabled = c.name in vm.store.disabledTools
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MxCard), border = MxCardBorder) {
                     Column(Modifier.padding(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(c.name, Modifier.weight(1f), color = if (disabled) MxGreen.copy(alpha = 0.4f) else MxGreen, fontFamily = mono, fontSize = 14.sp)
@@ -921,7 +961,7 @@ fun DeviceSelfTestScreen(vm: AgentViewModel, onBack: () -> Unit) {
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(results) { r ->
                 val c = when (r.status) { CheckStatus.PASS -> MxGreen; CheckStatus.FAIL -> Color(0xFFFF6E6E); CheckStatus.WARN -> Color(0xFFFFC107); CheckStatus.SKIP -> MxGreen.copy(alpha = 0.5f) }
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MxCard), border = MxCardBorder) {
                     Column(Modifier.padding(10.dp)) {
                         Text("${SelfTest.icon(r.status)} ${r.name}", color = c, fontFamily = mono, fontSize = 13.sp)
                         if (r.detail.isNotBlank()) Text(r.detail, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono, fontSize = 11.sp)
