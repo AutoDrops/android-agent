@@ -322,6 +322,8 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
     fun get(name: String) = byName[name]?.takeIf { name !in store.disabledTools }  // fail-closed per permission profile
     /** Base risk of each tool (evaluated with empty args) — used by per-tool permission profiles UI. */
     fun toolRisks(): List<Pair<String, Risk>> = specs.map { it.name to runCatching { it.risk(JSONObject()) }.getOrDefault(Risk.SENSITIVE) }
+    /** v3.17 capabilities/help: (name, englishDescription, baseRisk) straight from the registry. */
+    fun capabilitySpecs(): List<Triple<String, String, Risk>> = specs.map { Triple(it.name, it.description, runCatching { it.risk(JSONObject()) }.getOrDefault(Risk.SENSITIVE)) }
 
     // ---- implementations ----
 

@@ -21,7 +21,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-feature android:name="android.hardware.telephony" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.flash" android:required="false"/>
-    <application android:label="@string/app_name"
+    <application android:name=".App" android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="false"
         android:usesCleartextTraffic="false"
@@ -54,6 +54,7 @@
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter>
         </service>
+        <activity android:name=".RecoveryActivity" android:exported="false" android:process=":recovery" android:theme="@android:style/Theme.Material.NoActionBar"/>
         <activity android:name=".WebChatActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden"/>
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku"
             android:multiprocess="false" android:enabled="true" android:exported="true"

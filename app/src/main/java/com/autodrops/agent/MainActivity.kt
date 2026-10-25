@@ -96,11 +96,13 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, tileAction: String? 
             Box(Modifier.padding(pad)) {
                 when (tab) {
                     0 -> ChatTab(vm, onOpenModels = { tab = 1 }, onPalette = { palette = true }); 1 -> ModelsTab(vm) { tab = 0 }; 2 -> ToolsTab(vm, askPerms)
-                    3 -> DevTab(vm); 4 -> NetworkTab(vm); else -> SettingsTab(vm)
+                    3 -> DevTab(vm); 4 -> NetworkTab(vm); else -> SettingsTab(vm, askPerms)
                 }
             }
         }
     }
+    var showOnboarding by remember { mutableStateOf(!vm.onboardingDone()) }
+    if (showOnboarding) OnboardingScreen(vm, askPerms, onDone = { vm.markOnboardingDone(); showOnboarding = false })
     if (palette) CommandPalette(vm, onDismiss = { palette = false }, onNav = { tab = it; palette = false })
     vm.pending?.let { p ->
         AlertDialog(onDismissRequest = {}, containerColor = Color(0xFF07140C), titleContentColor = MxGreen, textContentColor = MxGreen,
@@ -560,10 +562,20 @@ fun NetworkTab(vm: AgentViewModel) {
 }
 
 @Composable
-fun SettingsTab(vm: AgentViewModel) {
+fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
     val convs by vm.conversations().collectAsState(initial = emptyList())
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Head("Налаштування")
+        var sub by remember { mutableStateOf("") }
+        var showOb by remember { mutableStateOf(false) }
+        if (showOb) { OnboardingScreen(vm, askPerms, onDone = { vm.markOnboardingDone(); showOb = false }); return }
+        if (sub == "caps") { CapabilitiesScreen(vm) { sub = "" }; return }
+        if (sub == "selftest") { DeviceSelfTestScreen(vm) { sub = "" }; return }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BigButton("Можливості (довідка)", { sub = "caps" }, Modifier.weight(1f))
+            BigButton("Самотест пристрою", { sub = "selftest" }, Modifier.weight(1f))
+        }
+        BigButton("Екран дозволів (онбординг)", { showOb = true }, Modifier.fillMaxWidth())
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.matrixRain, { vm.toggleMatrixRain(it) }); Text("Matrix «цифровий дощ»", color = MxGreen, fontFamily = mono) }
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.stream, { vm.store.stream = it }); Text("Потокові відповіді (stream)", color = MxGreen, fontFamily = mono) }
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.speakReplies, { vm.store.speakReplies = it }); Text("Озвучувати відповіді (TTS, укр.)", color = MxGreen, fontFamily = mono) }
@@ -795,4 +807,88 @@ fun CommandPalette(vm: AgentViewModel, onDismiss: () -> Unit, onNav: (Int) -> Un
             }
         } },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Закрити", color = MxGreen) } })
+}
+
+@Composable
+fun OnboardingScreen(vm: AgentViewModel, askPerms: () -> Unit, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val perms = PermissionCatalog.forThisDevice()
+    Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Head("Ласкаво просимо до DRON.exe")
+        Text("Щоб інструменти працювали на твоєму телефоні, надай дозволи нижче. Усе небезпечне все одно проходить підтвердження в застосунку. Нічого не надсилається, окрім твого API-провайдера.",
+            color = MxGreen.copy(alpha = 0.75f), fontFamily = mono, fontSize = 12.sp)
+        perms.forEach { p ->
+            val granted = Perms.has(ctx, p.permission)
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                Column(Modifier.padding(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(p.uaName, Modifier.weight(1f), color = MxGreen, fontFamily = mono, fontSize = 14.sp)
+                        Text(if (granted) "✓ надано" else "○ ні", color = if (granted) MxGreen else Color(0xFFFFC107), fontFamily = mono, fontSize = 12.sp)
+                    }
+                    Text(p.rationale, color = MxGreen.copy(alpha = 0.65f), fontFamily = mono, fontSize = 11.sp)
+                }
+            }
+        }
+        Text("Деякі можливості потребують спеціального доступу (Accessibility, Слухач сповіщень, Запис екрана) — їх можна увімкнути на вкладці «Інструменти».",
+            color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 11.sp)
+        BigButton("Надати runtime-дозволи", askPerms, Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BigButton("Пропустити", onDone, Modifier.weight(1f))
+            BigButton("Готово", onDone, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+fun CapabilitiesScreen(vm: AgentViewModel, onBack: () -> Unit) {
+    val caps = remember { vm.capabilities() }
+    var q by remember { mutableStateOf("") }
+    val filtered = caps.filter { it.name.contains(q, true) || it.description.contains(q, true) }
+    Column(Modifier.fillMaxSize().systemBarsPadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) { TextButton(onClick = onBack) { Text("‹ назад", color = MxGreen, fontFamily = mono) }; Head("Можливості") }
+        Text("Усі ${caps.size} інструментів агента (джерело: ToolRegistry). Ризик і рівень підтвердження вказано для кожного.",
+            fontSize = 11.sp, color = MxGreen.copy(alpha = 0.65f), fontFamily = mono)
+        OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("пошук…", fontFamily = mono) },
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(filtered, key = { it.name }) { c ->
+                val disabled = c.name in vm.store.disabledTools
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                    Column(Modifier.padding(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(c.name, Modifier.weight(1f), color = if (disabled) MxGreen.copy(alpha = 0.4f) else MxGreen, fontFamily = mono, fontSize = 14.sp)
+                            Text(Capabilities.riskUa(c.risk), color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
+                        }
+                        Text(c.description, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp)
+                        Text((if (disabled) "⛔ вимкнено профілем · " else "") + c.gating, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DeviceSelfTestScreen(vm: AgentViewModel, onBack: () -> Unit) {
+    val results = vm.deviceTestResults
+    Column(Modifier.fillMaxSize().systemBarsPadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) { TextButton(onClick = onBack) { Text("‹ назад", color = MxGreen, fontFamily = mono) }; Head("Самотест пристрою") }
+        Text("Справжні перевірки на цьому телефоні (лише читання / безпечні): доступ до API, офлайн-модель, дозволи, LAN, TTS. Результати не підроблюються.",
+            fontSize = 11.sp, color = MxGreen.copy(alpha = 0.65f), fontFamily = mono)
+        BigButton(if (vm.deviceTestBusy) "Виконую перевірки…" else "Запустити самотест", { vm.runDeviceSelfTest() }, Modifier.fillMaxWidth(), enabled = !vm.deviceTestBusy)
+        if (vm.deviceTestBusy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MxGreen)
+        if (results.isNotEmpty()) Text("Підсумок: ${SelfTest.summary(results)}", color = MxGreen, fontFamily = mono, fontSize = 13.sp)
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(results) { r ->
+                val c = when (r.status) { CheckStatus.PASS -> MxGreen; CheckStatus.FAIL -> Color(0xFFFF6E6E); CheckStatus.WARN -> Color(0xFFFFC107); CheckStatus.SKIP -> MxGreen.copy(alpha = 0.5f) }
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF07140C))) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text("${SelfTest.icon(r.status)} ${r.name}", color = c, fontFamily = mono, fontSize = 13.sp)
+                        if (r.detail.isNotBlank()) Text(r.detail, color = MxGreen.copy(alpha = 0.75f), fontFamily = mono, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+        if (results.isEmpty() && !vm.deviceTestBusy) Box(Modifier.weight(1f)) { Empty("Натисни «Запустити самотест».") }
+    }
 }

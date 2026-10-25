@@ -379,6 +379,54 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- v3.17: capabilities listing + on-device self-test ----
+    fun capabilities(): List<CapabilityRow> = Capabilities.rows(reg.capabilitySpecs())
+
+    var deviceTestBusy by mutableStateOf(false)
+    var deviceTestResults by mutableStateOf<List<CheckResult>>(emptyList())
+    /** Real, read-only / confirmation-safe checks on THIS phone. Honest pass/fail, no fabrication. */
+    fun runDeviceSelfTest() {
+        if (deviceTestBusy) return
+        deviceTestBusy = true; deviceTestResults = emptyList()
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val out = ArrayList<CheckResult>()
+            // 1. API reachability with the in-app key (read-only GET /models).
+            if (store.apiKey.isBlank()) out.add(CheckResult("API-ключ / доступ до моделей", CheckStatus.FAIL, "Ключ не задано у вкладці «Моделі»."))
+            else out.add(runCatching { llm.models(store.baseUrl, store.apiKey) }.fold(
+                { if (it.isNotEmpty()) CheckResult("API-ключ / доступ до моделей", CheckStatus.PASS, "OK: ${it.size} моделей (${Security.checkHost(store.baseUrl).host ?: store.baseUrl})")
+                  else CheckResult("API-ключ / доступ до моделей", CheckStatus.WARN, "Відповідь без моделей.") },
+                { CheckResult("API-ключ / доступ до моделей", CheckStatus.FAIL, Protocols.friendlyError(it.message)) }))
+            // 2. Local offline model presence (optional).
+            val lm = runnableModelOnDisk()
+            out.add(if (lm != null) CheckResult("Локальна офлайн-модель", CheckStatus.PASS, "На диску: ${lm.name}; рушій ${if (engineLinked) "злінковано" else "НЕ злінковано"}.")
+                    else CheckResult("Локальна офлайн-модель", CheckStatus.SKIP, "Не завантажено (необов'язково). Завантаж у «Налашт.»."))
+            // 3. Permission status per sensitive permission (read-only).
+            PermissionCatalog.forThisDevice().forEach { p ->
+                val granted = Perms.has(app, p.permission)
+                out.add(CheckResult("Дозвіл: ${p.uaName}", PermissionCatalog.statusCheck(granted),
+                    "${PermissionCatalog.shortName(p.permission)} — ${PermissionCatalog.statusLabel(granted)}"))
+            }
+            // 4. Safe LAN reachability — ping our own IPv4 only (read-only, no scan).
+            val self = runCatching { Lan.localIpv4() }.getOrNull()
+            if (self.isNullOrBlank()) out.add(CheckResult("LAN доступність", CheckStatus.SKIP, "Немає локальної IPv4 (Wi-Fi вимкнено?)."))
+            else {
+                val ping = runCatching { Net.ping(self) }.getOrElse { "помилка: ${it.message}" }
+                val ok = ping.contains("reachable", true)
+                out.add(CheckResult("LAN доступність (self $self)", if (ok) CheckStatus.PASS else CheckStatus.WARN, ping.take(120)))
+            }
+            // 5. TTS availability.
+            out.add(if (speaker.isReady()) CheckResult("Озвучення (TTS)", CheckStatus.PASS, "Готово, мова ${speaker.currentLang}.")
+                    else CheckResult("Озвучення (TTS)", CheckStatus.WARN, "Рушій TTS ще ініціалізується або відсутній."))
+            deviceTestResults = out
+            deviceTestBusy = false
+        }
+    }
+
+    // ---- v3.17: permission onboarding ----
+    fun onboardingDone(): Boolean = store.onboardingDone
+    fun markOnboardingDone() { store.onboardingDone = true }
+
     fun setLanWatch(enabled: Boolean) {
         store.lanWatchEnabled = enabled
         if (enabled) LanWatchScheduler.enable(getApplication()) else LanWatchScheduler.disable(getApplication())

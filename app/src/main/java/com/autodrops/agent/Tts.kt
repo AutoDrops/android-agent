@@ -74,6 +74,7 @@ class Speaker(context: Context) {
         return "Озвучую (${currentLang}): ${say.take(80)}"
     }
 
+    fun isReady(): Boolean = ready
     fun stop() { if (::engine.isInitialized) runCatching { engine.stop() } }
     fun shutdown() { if (::engine.isInitialized) runCatching { engine.stop(); engine.shutdown() } }
 }

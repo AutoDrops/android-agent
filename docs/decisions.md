@@ -218,3 +218,15 @@ Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; 
   3. **NEW `speak`** (LOW) + settings toggle «Озвучувати відповіді (TTS, укр.)» — Android TextToSpeech, Ukrainian preferred. Auto-speaks final assistant replies when enabled.
   4. **NEW `apps_list`** (LOW) + **`app_launch`** (EFFECT) — launchable apps via PackageManager; package-name validation.
 - Gate-not-remove: nothing cut. Built + unit-tested (V316Test); Cast live socket / TTS voice / app launch **not verified on real hardware** (no emulator/KVM). Secret-scan clean. No keys in repo.
+
+## v3.16.5 note — v3.15/v3.14 already covered phone-comms / RAG
+
+## v3.17 — robustness + on-device verifiability (2026-10-25)
+- **Goal:** stop growing tool surface; make the existing app crash-safe and verifiable on Bohdan's real phone. Built + unit-tested; **not verified on real hardware** (no emulator/KVM here).
+- **Already present (honest, not re-built):** tool exec already `runCatching` → clean error string to chat (fail-closed); Settings already had a per-tool enable list + profiles; Settings already had a MediaPipe engine self-check (`runSelfCheck`); ToolsTab already had a bulk «Запросити runtime-дозволи» button. Those kept; extended, not duplicated.
+- **NEW:**
+  1. **Global crash safety** — `App` Application installs `Thread.setDefaultUncaughtExceptionHandler`; `CrashReport` formats+saves a local report; `RecoveryActivity` shows it (copy/clear/relaunch) instead of a hard crash. Tool exec remains fail-closed via `runCatching`.
+  2. **Capabilities / Help screen** — lists every ToolRegistry tool with UA description (`ToolDocs`), risk, and gating level. Single source of truth = registry (`capabilitySpecs()`).
+  3. **On-device self-test screen** — real checks: API reachability with in-app key (GET /models), local model presence, each runtime-permission status, safe LAN ping of *own* IPv4, TTS readiness. Pass/fail/warn/skip with summary. Read-only / confirmation-safe.
+  4. **Permission onboarding** — first-run screen explaining each runtime permission in Ukrainian + request button; re-openable from Settings. `PermissionCatalog` is the pure source for SDK-filtered specs.
+- Gate-not-remove: nothing cut. +12 unit tests (V317Test) for crash formatting, capabilities, self-test modeling, permission mapping. Full suite green. Secret-scan clean; key only build-time via gitignored `local.properties` / `BuildConfig`, never in tracked source.

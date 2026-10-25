@@ -54,6 +54,10 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
         get() = prefs.getBoolean("vosk_enabled", false)
         set(v) = prefs.edit().putBoolean("vosk_enabled", v).apply()
 
+    /** v3.17: first-run permission onboarding shown once. */
+    var onboardingDone: Boolean
+        get() = prefs.getBoolean("onboarding_done", false)
+        set(v) = prefs.edit().putBoolean("onboarding_done", v).apply()
     var speakReplies: Boolean
         get() = prefs.getBoolean("speak_replies", false)
         set(v) = prefs.edit().putBoolean("speak_replies", v).apply()
