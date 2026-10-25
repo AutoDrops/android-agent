@@ -416,9 +416,17 @@ fun DevTab(vm: AgentViewModel) {
         Head("Термінал / Код")
         Text("Файли", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
         if (files.isEmpty()) Text("Порожньо. Створи файл у терміналі: echo hi > a.txt", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
-        LazyColumn(Modifier.heightIn(max = 110.dp)) {
-            items(files, key = { it }) { f -> Text(f, Modifier.fillMaxWidth().background(if (f == selected) Color(0xFF0B2A16) else Color.Transparent)
-                .clickable { selected = f; content = vm.readFile(f); dirty = false }.padding(6.dp), fontFamily = mono, fontSize = 12.sp, color = MxGreen) }
+        val tree = DevTree.build(files)
+        LazyColumn(Modifier.heightIn(max = 140.dp)) {
+            items(tree, key = { it.path }) { row ->
+                val isSel = !row.isDir && row.path == selected
+                Text((if (row.isDir) "📁 " else "• ") + row.name,
+                    Modifier.fillMaxWidth().background(if (isSel) Color(0xFF0B2A16) else Color.Transparent)
+                        .then(if (row.isDir) Modifier else Modifier.clickable { selected = row.path; content = vm.readFile(row.path); dirty = false })
+                        .padding(start = (6 + row.depth * 14).dp, top = 5.dp, bottom = 5.dp, end = 6.dp),
+                    fontFamily = mono, fontSize = 12.sp,
+                    color = if (row.isDir) MxGreen.copy(alpha = 0.6f) else MxGreen)
+            }
         }
         Divider(Modifier.padding(vertical = 4.dp), color = MxDim)
         if (selected == null) Text("Обери файл для редагування.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
@@ -427,7 +435,7 @@ fun DevTab(vm: AgentViewModel) {
                 Text(selected!!, Modifier.weight(1f), fontFamily = mono, fontSize = 12.sp, color = MxGreen)
                 if (dirty) Text("●", color = Color(0xFFFFC107))
                 TextButton(onClick = { vm.writeFile(selected!!, content); dirty = false }) { Text("Зберегти", color = MxGreen, fontFamily = mono) }
-                TextButton(onClick = { vm.runTerminal(runCommandFor(selected!!), true) { term = it } }) { Text("Запуск", color = MxGreen, fontFamily = mono) }
+                TextButton(onClick = { vm.runTerminal(runCommandFor(selected!!), true) { term = it } }) { Text("Запуск\u2192чат", color = MxGreen, fontFamily = mono) }
             }
             OutlinedTextField(content, { content = it; dirty = true }, Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 220.dp),
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, fontSize = 12.sp, color = MxGreen),

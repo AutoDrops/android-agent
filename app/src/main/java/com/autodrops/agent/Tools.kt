@@ -86,7 +86,33 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
             preview = { "backend=${store.shellMode} cwd=workspace\n$ ${sanitizeForDisplay(it.str("command"))}" },
             exec = { Exec.run(ctx, it.getString("command"), it.intOr("timeout_sec", 20).coerceIn(1, 180), store.shellMode) }))
 
-        add(ToolSpec("run_script", "Run a Python/Node/bash script via Termux (RUN_COMMAND intent). Requires Termux + termux-api installed and RUN_COMMAND allowed.",
+        // ---- Codex-like on-phone coding/dev environment (sandbox workspace; file tree + editor back these tools) ----
+        add(ToolSpec("file_list", "List files in the app sandbox workspace as an indented tree. Optional relative subdirectory.",
+            Schema.obj("path" to Schema.str("Relative subdir inside workspace; empty = root"), required = emptyList()),
+            risk = { Risk.LOW }, exec = { fileList(it.str("path")) }))
+        add(ToolSpec("file_read", "Read a text file from the app sandbox workspace.",
+            Schema.obj("path" to Schema.str("Relative path inside workspace"), required = listOf("path")),
+            risk = { Risk.LOW }, exec = {
+                val f = safe(it.getString("path"))
+                if (f == null) "path escapes workspace" else if (f.exists() && f.isFile) f.readText().take(32000) else "not found"
+            }))
+        add(ToolSpec("file_write", "Create or overwrite a text file in the app sandbox workspace (dangerous: gated by confirmation).",
+            Schema.obj("path" to Schema.str("Relative path inside workspace"), "content" to Schema.str("File content"), required = listOf("path", "content")),
+            risk = { Risk.EFFECT }, preview = { "file_write ${it.str("path")} (${it.str("content").length} chars)" }, exec = {
+                val f = safe(it.getString("path"))
+                if (f == null) "path escapes workspace" else { f.parentFile?.mkdirs(); f.writeText(it.getString("content")); "wrote ${f.length()} bytes to ${it.getString("path")}" }
+            }))
+        add(ToolSpec("run_script", "Run a shell command/script in the sandbox workspace (sh -c via Exec.run) and stream the command + combined stdout/stderr back into chat. Backend set in settings (sandbox/root).",
+            Schema.obj("command" to Schema.str("Shell command or script to run"), "timeout_sec" to Schema.int("Timeout seconds, default 30", 1, 180), required = listOf("command")),
+            risk = { if (store.shellMode == "root") Risk.ELEVATED else Risk.HIGH },
+            preview = { "run_script backend=${store.shellMode} cwd=workspace\n$ ${sanitizeForDisplay(it.str("command"))}" },
+            exec = {
+                val cmd = it.getString("command")
+                val out = Exec.run(ctx, cmd, it.intOr("timeout_sec", 30).coerceIn(1, 180), store.shellMode)
+                DevTree.formatRun(cmd, out)
+            }))
+
+        add(ToolSpec("termux_run", "Run a Python/Node/bash script via Termux (RUN_COMMAND intent). Requires Termux + termux-api installed and RUN_COMMAND allowed. For in-app streamed output use run_script instead.",
             Schema.obj("interpreter" to Schema.str("Interpreter", listOf("bash", "python", "node")),
                 "code" to Schema.str("Script source"), required = listOf("interpreter", "code")),
             risk = { Risk.HIGH }, preview = { "Termux ${it.str("interpreter")}:\n${sanitizeForDisplay(it.str("code"))}" },
@@ -394,6 +420,15 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
             "mkdir" -> if (f.mkdirs()) "created" else "mkdir failed"
             else -> "unknown op"
         }
+    }
+
+    private fun fileList(sub: String): String {
+        val ws = Exec.workspace(ctx)
+        val root = if (sub.isBlank()) ws else (safe(sub) ?: return "path escapes workspace")
+        if (!root.exists()) return "not found"
+        val paths = root.walkTopDown().filter { it.isFile && it.length() < 400_000 }
+            .map { it.relativeTo(ws).path }.sorted().toList()
+        return DevTree.render(paths)
     }
 
     private fun listApps(filter: String): String {
