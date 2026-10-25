@@ -77,7 +77,7 @@ object ModelCatalogLocal {
         LocalModel(
             id = "llama32-1b-instruct-ablit-q4",
             name = "Llama-3.2-1B-Instruct «без цензури» (GGUF Q4_K_M)",
-            url = "https://github.com/AutoDrops/android-agent/releases/download/v3.19/llama32-1b-instruct-ablit-q4.gguf",
+            url = "https://github.com/AutoDrops/android-agent/releases/download/v3.21/llama32-1b-instruct-ablit-q4.gguf",
             sizeMb = 912,
             sha256 = "68336c25367576f49b29f01ee9034658b51bbded6a7f215e934d997de96301e0",
             engine = "gguf",

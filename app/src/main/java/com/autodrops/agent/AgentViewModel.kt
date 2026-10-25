@@ -46,6 +46,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         store.seedEmbeddedKeyIfNeeded()
+        refreshChatGptState()
         runCatching { RuleScheduler.ensureScheduled(getApplication()) }
         runCatching { if (store.lanWatchEnabled) LanWatchScheduler.enable(getApplication()) }
         if (history.length() == 0) history.put(JSONObject().put("role", "system").put("content", systemPrompt))
@@ -481,14 +482,15 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         if (enabled) LanWatchScheduler.enable(getApplication()) else LanWatchScheduler.disable(getApplication())
     }
 
+    var toolsVersion by mutableStateOf(0)
     fun toolRisks() = reg.toolRisks()
     fun applyToolProfile(profile: String) {
         store.toolProfile = profile
-        store.disabledTools = ToolProfiles.disabledFor(profile, reg.toolRisks())
+        store.disabledTools = ToolProfiles.disabledFor(profile, reg.toolRisks()); toolsVersion++
     }
     fun toggleTool(name: String, enabled: Boolean) {
         store.disabledTools = if (enabled) store.disabledTools - name else store.disabledTools + name
-        store.toolProfile = "custom"
+        store.toolProfile = "custom"; toolsVersion++
     }
 
     suspend fun exportRecipesJson(): String = RecipeBundle.build(db.dao().recipesOnce())
@@ -550,8 +552,54 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         return Usage(pt, ct, cost)
     }
 
+    // ---- v3.22: ChatGPT (subscription) via Codex-CLI OAuth ----
+    private val cgStore by lazy { ChatGptTokenStore(SecureStore.encrypted(getApplication(), "chatgpt_auth")) }
+    private val cg by lazy { ChatGptClient(cgStore) }
+    var cgSignedIn by mutableStateOf(false); private set
+    var cgEmail by mutableStateOf("")
+    var cgUserCode by mutableStateOf("")
+    var cgStatus by mutableStateOf("")
+    var cgBusy by mutableStateOf(false)
+    var cgModels by mutableStateOf<List<String>>(ChatGptOAuth.DEFAULT_MODELS)
+    private var cgJob: Job? = null
+    fun refreshChatGptState() { runCatching { val t = cgStore.load(); cgSignedIn = t != null; cgEmail = t?.email.orEmpty(); cgModels = cgStore.models } }
+    /** Device-code login (Codex CLI flow): show user_code, open auth.openai.com/codex/device, poll. */
+    fun chatGptLogin(openUrl: (String) -> Unit) {
+        if (cgBusy) return
+        cgBusy = true; cgStatus = "Отримую код входу…"; cgUserCode = ""
+        cgJob = viewModelScope.launch {
+            try {
+                val dc = cg.startDevice()
+                cgUserCode = dc.userCode
+                cgStatus = "Відкрий ${ChatGptOAuth.DEVICE_PAGE}, увійди в ChatGPT і введи код ${dc.userCode}. Чекаю підтвердження…"
+                runCatching { openUrl(ChatGptOAuth.DEVICE_PAGE) }
+                val t = cg.pollDevice(dc)
+                cg.liveModels()?.let { cgStore.models = it }
+                refreshChatGptState(); cgUserCode = ""
+                cgStatus = "✓ Вхід виконано${if (t.email.isNotBlank()) " (${t.email})" else ""}. Моделі ChatGPT додано в список."
+            } catch (e: kotlinx.coroutines.CancellationException) { cgStatus = "Вхід скасовано." }
+            catch (e: Exception) { cgStatus = "ПОМИЛКА: " + (e.message ?: e.javaClass.simpleName) }
+            finally { cgBusy = false }
+        }
+    }
+    fun cancelChatGptLogin() { cgJob?.cancel(); cgBusy = false; cgUserCode = "" }
+    fun chatGptLogout() {
+        cgStore.clear(); refreshChatGptState(); cgStatus = "Вихід виконано, токени видалено."
+        if (ChatGptOAuth.isChatGptModel(store.model)) store.model = SecureStore.DEFAULT_MODEL
+    }
+    fun chatGptRefresh() { viewModelScope.launch {
+        cgStatus = runCatching { cg.refresh(); refreshChatGptState(); "✓ Токен оновлено." }.getOrElse { refreshChatGptState(); "ПОМИЛКА: ${it.message}" }
+    } }
+    fun selectChatGptModel(m: String) { store.model = ChatGptOAuth.PREFIX + m }
+
     fun send(text: String) {
         if (text.isBlank() || busy) return
+        if (ChatGptOAuth.isChatGptModel(store.model)) {
+            refreshChatGptState()
+            if (!cgSignedIn) { add("error", "Увійди через ChatGPT: вкладка «Моделі» → «Увійти через ChatGPT»."); return }
+            add("user", text); AgentPlan.clear()
+            history.put(JSONObject().put("role", "user").put("content", text)); startSendLoop(text); return
+        }
         if (store.effectiveKey.isBlank()) { add("error", "Введіть ключ OpenRouter: вкладка «Моделі» → поле «API ключ» → «Зберегти»."); return }
         val hv = Security.checkHost(store.baseUrl)
         if (!hv.allowed) { add("error", hv.warning ?: "Небезпечна адреса сервера."); return }
@@ -581,7 +629,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 // Gate sending the API key to a non-allowlisted (but HTTPS) host behind explicit consent.
                 val host = hv.host
-                if (hv.warning != null && host != null && host !in store.approvedHosts) {
+                val isCg = ChatGptOAuth.isChatGptModel(store.model)
+                if (!isCg && hv.warning != null && host != null && host !in store.approvedHosts) {
                     val d = CompletableDeferred<Boolean>()
                     pending = Confirm("Надіслати ключ на $host?", Risk.ELEVATED, (hv.warning ?: "") + "\n\nКлюч буде надіслано на $host. Підтверди лише якщо довіряєш цьому серверу.", d)
                     val approved = d.await()
@@ -590,20 +639,27 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (items.count { it.role == "user" } == 1) db.dao().touch(convId, text.take(40))
                 // v3.18: heuristic prompt-length model routing (off by default; backward-compatible).
-                val routedModel = ModelRouter.choose(store.routingEnabled, store.routingSmallModel,
+                val routedModel = if (isCg) store.model else ModelRouter.choose(store.routingEnabled, store.routingSmallModel,
                     store.routingLargeModel, store.routingThresholdChars, store.model, text.length)
                 if (routedModel != store.model)
                     ModelRouter.explain(routedModel, store.model, text.length, store.routingThresholdChars)
                         .takeIf { it.isNotBlank() }?.let { add("info", it) }
                 var consecutiveErrors = 0
+                var nudges = 0
+                val known = reg.openAiTools().let { a -> (0 until a.length()).map { a.getJSONObject(it).getJSONObject("function").getString("name") }.toSet() }
                 for (step in 1..maxSteps) {
-                    val streaming = store.stream
-                    val supportsTools = catalog.firstOrNull { it.id == routedModel }?.let { it.params.isEmpty() || it.params.contains("tools") } ?: true
+                    val streaming = store.stream || isCg
+                    val supportsTools = isCg || catalog.firstOrNull { it.id == routedModel }?.let { it.params.isEmpty() || it.params.contains("tools") } ?: true
                     val toolSpec = if (supportsTools) reg.openAiTools() else JSONArray()
+                    // v3.22: models without native tools get the text tool protocol in the system prompt.
+                    val sendHistory = if (supportsTools) history else JSONArray(history.toString()).also { h ->
+                        val sys = h.getJSONObject(0); sys.put("content", sys.optString("content") + "\n\n" + TextTools.instructions(known)) }
                     val streamItem = if (streaming) add("assistant", "") else null
-                    val msg = llm.complete(store.baseUrl, store.effectiveKey, routedModel, history, toolSpec, streaming) { delta ->
-                        streamItem?.let { it.text += delta; items[items.indexOf(it)] = it.copy(text = it.text) }
+                    val onDelta: (String) -> Unit = { delta ->
+                        streamItem?.let { it.text += delta; val ix = items.indexOf(it); if (ix >= 0) items[ix] = it.copy(text = it.text) }
                     }
+                    val msg = if (isCg) cg.complete(routedModel, sendHistory, toolSpec, onDelta)
+                              else llm.complete(store.baseUrl, store.effectiveKey, routedModel, sendHistory, toolSpec, streaming, onDelta)
                     val usage = parseUsage(msg); msg.remove("_usage")
                     history.put(msg)
                     val content = msg.optString("content", "").takeIf { it != "null" } ?: ""
@@ -611,16 +667,27 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                     else if (content.isNotBlank()) { val it0 = add("assistant", content); val i = items.indexOf(it0); if (i >= 0) items[i] = it0.copy(usage = usage) }
                     if (usage != null) sessionUsage += usage
 
-                    val calls = msg.optJSONArray("tool_calls")
+                    var calls = msg.optJSONArray("tool_calls")
+                    var textMode = false
                     if (calls == null || calls.length() == 0) {
-                        if (TtsPolicy.shouldSpeak(store.speakReplies, content)) runCatching { speaker.speak(content) }
-                        break
+                        // v3.22 fallback: tool blocks written as text (models that ignore/lack native tool calling).
+                        val parsed = TextTools.parse(content, known)
+                        if (parsed.isNotEmpty()) { calls = TextTools.toToolCalls(parsed, step); textMode = true
+                            add("info", "Модель не викликала інструмент напряму — виконую ${parsed.size} команд(и) з її тексту.") }
+                        else if (TextTools.narratesWithoutAction(content) && nudges < 2) {
+                            nudges++; add("info", "Модель лише описала команди — прошу її реально їх виконати…")
+                            history.put(JSONObject().put("role", "user").put("content", TextTools.NUDGE + if (!supportsTools) "\n" + TextTools.instructions(known) else ""))
+                            continue
+                        } else {
+                            if (TtsPolicy.shouldSpeak(store.speakReplies, content)) runCatching { speaker.speak(content) }
+                            break
+                        }
                     }
                     for (i in 0 until calls.length()) {
                         val c = calls.getJSONObject(i); val fn = c.getJSONObject("function")
                         val name = fn.getString("name"); val argStr = fn.optString("arguments", "{}")
                         val spec = if (name in store.disabledTools) null else reg.get(name)
-                        val card = ToolCard(name, "", "running")
+                        val card = ToolCard(name, argStr.take(400), "running")
                         val item = add("tool", "", card)
                         fun update(s: String, o: String = card.output) { card.status = s; card.output = o; val idx = items.indexOf(item); if (idx >= 0) items[idx] = item.copy(card = card.copy(status = s, output = o)) }
                         val result: String
@@ -652,7 +719,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                         val redacted = Security.redact(result)
                         val shown = if (Security.wasRedacted(result, redacted)) "$redacted\n[секрети приховано приватним фаєрволом]" else result
                         update(if (result.startsWith("User denied")) "denied" else "done", shown.take(16000))
-                        history.put(JSONObject().put("role", "tool").put("tool_call_id", c.optString("id")).put("name", name).put("content", redacted.take(16000)))
+                        if (textMode) history.put(JSONObject().put("role", "user").put("content", TextTools.resultMessage(name, argStr, redacted.take(16000))))
+                        else history.put(JSONObject().put("role", "tool").put("tool_call_id", c.optString("id")).put("name", name).put("content", redacted.take(16000)))
                     }
                     if (consecutiveErrors >= 3) { add("info", "Зупинено: 3 помилки інструментів поспіль (захист від зациклення). Уточни запит."); break }
                 }

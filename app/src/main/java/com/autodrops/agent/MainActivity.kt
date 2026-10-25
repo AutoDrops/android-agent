@@ -163,7 +163,7 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
             Text("▾ ${vm.store.model.substringAfterLast('/')}", Modifier.clickable { onOpenModels() }, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp)
         }
         PlanPanel()
-        if (!vm.hasKey) Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpenModels() },
+        if (!vm.hasKey && !(ChatGptOAuth.isChatGptModel(vm.store.model) && vm.cgSignedIn)) Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpenModels() },
             colors = CardDefaults.cardColors(containerColor = Color(0xFF2A0E0E)), border = MxCardBorder) {
             Column(Modifier.padding(14.dp)) {
                 Text("⚠ Введіть ключ OpenRouter", color = Color(0xFFFF6E6E), fontFamily = mono, fontSize = 17.sp)
@@ -261,6 +261,7 @@ fun ModelsTab(vm: AgentViewModel, onPicked: () -> Unit) {
         }
         BigButton(if (vm.connBusy) "Перевірка…" else "Перевірити з'єднання", { vm.testConnection() }, enabled = !vm.connBusy)
         if (vm.connStatus.isNotBlank()) Text(vm.connStatus, fontSize = 13.sp, fontFamily = mono, color = if (vm.connStatus.startsWith("ПОМИЛКА")) Color(0xFFFF6E6E) else MxGreen)
+        ChatGptSection(vm, onPicked)
         Text("Поточна: ${vm.store.model}", fontSize = 12.sp, color = MxGreen, fontFamily = mono)
         if (vm.catalogBusy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MxGreen)
         // category chips
@@ -316,7 +317,7 @@ fun ToolsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Head("Інструменти")
         Text("Веб-вхід (офіційні сайти у WebView, без скрапінгу токенів)", fontFamily = mono, fontSize = 12.sp, color = MxGreen.copy(alpha = 0.7f))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            BigButton("ChatGPT", { web("https://chatgpt.com") }, Modifier.weight(1f))
+            BigButton("ChatGPT (сайт)", { web("https://chatgpt.com") }, Modifier.weight(1f))
             BigButton("Grok", { web("https://grok.com") }, Modifier.weight(1f))
             BigButton("Gemini", { web("https://gemini.google.com") }, Modifier.weight(1f))
         }
@@ -609,6 +610,11 @@ fun NetworkTab(vm: AgentViewModel) {
 
 @Composable
 fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val toolsRev = vm.toolsVersion // recompose profile chips + tool switches
+    var lanOn by remember { mutableStateOf(vm.store.lanWatchEnabled) }
+    var voskOn by remember { mutableStateOf(vm.voskEnabled()) }
+    var strictOn by remember { mutableStateOf(vm.voskStrict()) }
+    var shellMode by remember { mutableStateOf(vm.store.shellMode) }
     val convs by vm.conversations().collectAsState(initial = emptyList())
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Head("Налаштування")
@@ -623,13 +629,13 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         }
         BigButton("Екран дозволів (онбординг)", { showOb = true }, Modifier.fillMaxWidth())
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.matrixRain, { vm.toggleMatrixRain(it) }, colors = mxSwitchColors()); Text("Boot-екран при старті (Parrot-style лог)", color = MxGreen, fontFamily = mono) }
-        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.stream, { vm.store.stream = it }, colors = mxSwitchColors()); Text("Потокові відповіді (stream)", color = MxGreen, fontFamily = mono) }
-        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.speakReplies, { vm.store.speakReplies = it }, colors = mxSwitchColors()); Text("Озвучувати відповіді (TTS, укр.)", color = MxGreen, fontFamily = mono) }
+        Row(verticalAlignment = Alignment.CenterVertically) { var streamOn by remember { mutableStateOf(vm.store.stream) }; Switch(streamOn, { streamOn = it; vm.store.stream = it }, colors = mxSwitchColors()); Text("Потокові відповіді (stream)", color = MxGreen, fontFamily = mono) }
+        Row(verticalAlignment = Alignment.CenterVertically) { var speakOn by remember { mutableStateOf(vm.store.speakReplies) }; Switch(speakOn, { speakOn = it; vm.store.speakReplies = it }, colors = mxSwitchColors()); Text("Озвучувати відповіді (TTS, укр.)", color = MxGreen, fontFamily = mono) }
         Text("Мова: українська (типово), англійська доступна у системних налаштуваннях.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
         Divider(color = MxDim)
         Text("Виконання shell", fontFamily = mono, color = MxGreen)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("sandbox", "root").forEach { mode -> FilterChip(selected = vm.store.shellMode == mode, onClick = { vm.store.shellMode = mode }, label = { Text(mode, fontFamily = mono) },
+            listOf("sandbox", "root").forEach { mode -> FilterChip(selected = shellMode == mode, onClick = { shellMode = mode; vm.store.shellMode = mode }, label = { Text(mode, fontFamily = mono) },
                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MxDim, selectedLabelColor = MxGreen, labelColor = MxGreen.copy(alpha = 0.6f))) }
         }
         Text("Кроків агента: ${vm.maxSteps}", fontFamily = mono, color = MxGreen)
@@ -691,14 +697,14 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Text("Фоновий моніторинг мережі (LAN watch)", fontFamily = mono, color = MxGreen)
         var confirmLan by remember { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(vm.store.lanWatchEnabled, { on -> if (on) confirmLan = true else vm.setLanWatch(false) }, colors = mxSwitchColors())
+            Switch(lanOn, { on -> if (on) confirmLan = true else { vm.setLanWatch(false); lanOn = false } }, colors = mxSwitchColors())
             Text("Перевіряти інвентар кожні ~15 хв і сповіщати про нові/зниклі пристрої", color = MxGreen, fontFamily = mono, fontSize = 12.sp)
         }
         Text("Пінгує ЛИШЕ збережені приватні IP (RFC1918). Результати НЕ надсилаються у хмарну модель — тільки локальні сповіщення.", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
         if (confirmLan) AlertDialog(onDismissRequest = { confirmLan = false }, containerColor = MxCard, textContentColor = MxGreen,
             title = { Text("Увімкнути LAN-моніторинг?", fontFamily = mono, color = MxGreen) },
             text = { Text("Фонове завдання періодично пінгуватиме твої збережені приватні IP і надсилатиме локальні сповіщення про зміни. Нічого не йде у хмару.", fontFamily = mono, fontSize = 12.sp) },
-            confirmButton = { Button(onClick = { vm.setLanWatch(true); confirmLan = false }, colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Text("Увімкнути") } },
+            confirmButton = { Button(onClick = { vm.setLanWatch(true); lanOn = true; confirmLan = false }, colors = ButtonDefaults.buttonColors(containerColor = MxGreen, contentColor = MxBg)) { Text("Увімкнути") } },
             dismissButton = { TextButton(onClick = { confirmLan = false }) { Text("Скасувати", color = MxGreen) } })
         Divider(color = MxDim)
         // ---- Per-tool permission profiles ----
@@ -775,11 +781,11 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
         Text("Офлайн-голос (Vosk)", fontFamily = mono, color = MxGreen)
         Text("Завантаж модель Vosk на вимогу — у APK вона не вшита. Push-to-talk використовує Vosk офлайн, коли модель є; інакше — системний розпізнавач. Активний: ${vm.voiceEngineLabel()}.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(vm.voskEnabled(), { vm.setVoskEnabled(it) }, colors = mxSwitchColors())
+            Switch(voskOn, { voskOn = it; vm.setVoskEnabled(it) }, colors = mxSwitchColors())
             Text(if (vm.voskEnabled()) "Vosk увімкнено" else "Vosk вимкнено (системний STT)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(vm.voskStrict(), { vm.setVoskStrict(it) }, colors = mxSwitchColors())
+            Switch(strictOn, { strictOn = it; vm.setVoskStrict(it) }, colors = mxSwitchColors())
             Text("Строгий офлайн (не передавати аудіо системному розпізнавачу)", color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
         }
         var vadOn by remember { mutableStateOf(vm.store.vadAutoStop) }
@@ -1018,5 +1024,35 @@ fun BootScreen(vm: AgentViewModel, onDone: () -> Unit) {
         }
         Spacer(Modifier.weight(1f))
         Text("тап — пропустити", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 11.sp)
+    }
+}
+
+/** v3.22: ChatGPT subscription as an in-app model (Codex-CLI device-code OAuth). */
+@Composable
+fun ChatGptSection(vm: AgentViewModel, onPicked: () -> Unit) {
+    val ctx = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MxCard), border = MxCardBorder) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { open = !open }) {
+                Text("ChatGPT (підписка) " + if (vm.cgSignedIn) "✓ ${vm.cgEmail}" else "— не виконано вхід", Modifier.weight(1f), color = MxGreen, fontFamily = mono, fontSize = 14.sp)
+                Text(if (open) "▴" else "▾", color = MxGreen)
+            }
+            if (!vm.cgSignedIn) {
+                if (vm.cgBusy) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BigButton("Відкрити сторінку входу", { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(ChatGptOAuth.DEVICE_PAGE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
+                    TextButton(onClick = { vm.cancelChatGptLogin() }) { Text("Скасувати", color = MxGreen, fontFamily = mono) }
+                } else BigButton("Увійти через ChatGPT", { vm.chatGptLogin { url ->
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }, Modifier.fillMaxWidth())
+                if (vm.cgUserCode.isNotBlank()) SelectionContainer { Text("Код: ${vm.cgUserCode}", color = Color(0xFFFFC107), fontFamily = mono, fontSize = 22.sp) }
+            } else {
+                LazyRowChips(vm.cgModels.map { it to it }, ChatGptOAuth.backendModel(vm.store.model)) { vm.selectChatGptModel(it); onPicked() }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { vm.chatGptRefresh() }) { Text("Оновити токен", color = MxGreen, fontFamily = mono, fontSize = 12.sp) }
+                    TextButton(onClick = { vm.chatGptLogout() }) { Text("Вийти", color = Color(0xFFFF6E6E), fontFamily = mono, fontSize = 12.sp) }
+                }
+            }
+            if (vm.cgStatus.isNotBlank()) Text(vm.cgStatus, fontSize = 12.sp, fontFamily = mono, color = if (vm.cgStatus.startsWith("ПОМИЛКА")) Color(0xFFFF6E6E) else MxGreen)
+        }
     }
 }
