@@ -55,8 +55,8 @@ class MainActivity : ComponentActivity() {
         }
     }
     fun askPerms() {
-        val p = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_CONTACTS, Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= 33) p += Manifest.permission.NEARBY_WIFI_DEVICES
+        val p = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_CONTACTS, Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS)
+        if (Build.VERSION.SDK_INT >= 33) { p += Manifest.permission.NEARBY_WIFI_DEVICES; p += Manifest.permission.POST_NOTIFICATIONS }
         perms.launch(p.toTypedArray())
     }
 }

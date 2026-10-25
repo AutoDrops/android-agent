@@ -1,5 +1,6 @@
 package com.autodrops.agent
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.content.ClipData
@@ -14,6 +15,8 @@ import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.provider.ContactsContract
+import android.provider.Telephony
+import android.telephony.SmsManager
 import android.provider.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -140,6 +143,19 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
         add(ToolSpec("send_sms", "Open the SMS app pre-filled (ACTION_SENDTO; user presses send).",
             Schema.obj("number" to Schema.str("Phone number"), "message" to Schema.str("Message body"), required = listOf("number", "message")),
             risk = { Risk.EFFECT }, exec = { sendSms(it.getString("number"), it.getString("message")) }))
+
+        add(ToolSpec("sms_read", "Read the SMS inbox, most recent first (requires READ_SMS).",
+            Schema.obj("limit" to Schema.int("Max messages (1-100)", 1, 100), required = emptyList()),
+            risk = { Risk.SENSITIVE }, exec = { smsRead(it.intOr("limit", 30)) }))
+
+        add(ToolSpec("sms_send", "Send an SMS directly via the radio (SEND_SMS; costs money, reaches a third party).",
+            Schema.obj("number" to Schema.str("Phone number"), "message" to Schema.str("Message body"), required = listOf("number", "message")),
+            risk = { Risk.HIGH }, preview = { "sms_send → ${it.str("number")}: ${sanitizeForDisplay(it.str("message")).take(160)}" },
+            exec = { smsSend(it.getString("number"), it.getString("message")) }))
+
+        add(ToolSpec("notification_post", "Post a local notification on this device.",
+            Schema.obj("title" to Schema.str("Title"), "text" to Schema.str("Body text"), required = listOf("title")),
+            risk = { Risk.LOW }, exec = { notificationPost(it.getString("title"), it.str("text")) }))
 
         add(ToolSpec("ui_action", "Accessibility UI control: dump the screen, click/type by text or id, tap/swipe coordinates, or global back/home/recents.",
             Schema.obj("action" to Schema.str("Action", listOf("dump", "click", "set_text", "tap", "swipe", "global")),
@@ -468,6 +484,52 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
     private fun sendSms(number: String, msg: String): String {
         ctx.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).putExtra("sms_body", msg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return "Opened SMS app to $number (user must press send)."
+    }
+
+    @SuppressLint("Range")
+    private fun smsRead(limit: Int): String {
+        Perms.require(ctx, Manifest.permission.READ_SMS)?.let { return it }
+        return runCatching {
+            ctx.contentResolver.query(
+                Telephony.Sms.Inbox.CONTENT_URI,
+                arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
+                null, null, "${Telephony.Sms.DATE} DESC"
+            )?.use { c ->
+                val out = ArrayList<SmsFormat.Msg>()
+                while (c.moveToNext() && out.size < limit.coerceIn(1, 100))
+                    out.add(SmsFormat.Msg(c.getString(0) ?: "", c.getString(1) ?: "", c.getLong(2)))
+                SmsFormat.format(out, limit)
+            } ?: "sms query failed"
+        }.getOrElse { "sms_read error (permission?): ${it.message}" }
+    }
+
+    private fun smsSend(number: String, message: String): String {
+        if (!SmsFormat.validNumber(number)) return "invalid number"
+        if (!SmsFormat.validMessage(message)) return "invalid message (empty or >1600 chars)"
+        Perms.require(ctx, Manifest.permission.SEND_SMS)?.let { return it }
+        return runCatching {
+            val sm = if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(SmsManager::class.java)
+                     else @Suppress("DEPRECATION") SmsManager.getDefault()
+            val parts = sm.divideMessage(message)
+            if (parts.size > 1) sm.sendMultipartTextMessage(number, null, parts, null, null)
+            else sm.sendTextMessage(number, null, message, null, null)
+            "SMS sent to $number (${parts.size} part(s))."
+        }.getOrElse { "sms_send failed: ${it.message}" }
+    }
+
+    private fun notificationPost(title: String, text: String): String {
+        if (Build.VERSION.SDK_INT >= 33)
+            Perms.require(ctx, Manifest.permission.POST_NOTIFICATIONS)?.let { return it }
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val ch = "dron_agent"
+        if (Build.VERSION.SDK_INT >= 26)
+            nm.createNotificationChannel(android.app.NotificationChannel(ch, "DRON.exe", NotificationManager.IMPORTANCE_DEFAULT))
+        val n = android.app.Notification.Builder(ctx, ch)
+            .setContentTitle(sanitizeForDisplay(title).take(100))
+            .setContentText(sanitizeForDisplay(text).take(500))
+            .setSmallIcon(android.R.drawable.ic_dialog_info).setAutoCancel(true).build()
+        nm.notify((System.currentTimeMillis() % 100000).toInt(), n)
+        return "notification posted"
     }
 
     private fun termuxRun(interp: String, code: String): String {
