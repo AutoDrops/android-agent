@@ -26,7 +26,7 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
 /** Holds the most recent OCR text from a user-approved capture. Never populated silently. */
-object ScreenText { @Volatile var last: String? = null }
+object ScreenText { @Volatile var last: String? = null; @Volatile var capturedAt: Long = 0L }
 
 /** Thin activity that asks for MediaProjection consent, then hands the token to the foreground service. */
 class ScreenCaptureActivity : ComponentActivity() {
@@ -77,10 +77,10 @@ class ScreenCaptureService : Service() {
                 val cropped = Bitmap.createBitmap(bmp, 0, 0, w, h)
                 val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                 recognizer.process(InputImage.fromBitmap(cropped, 0))
-                    .addOnSuccessListener { ScreenText.last = Ocr.cleanup(it.text) }
+                    .addOnSuccessListener { ScreenText.last = Ocr.cleanup(it.text); ScreenText.capturedAt = System.currentTimeMillis() }
                     .addOnCompleteListener { cleanup(mp, vd, reader) }
             } catch (e: Exception) {
-                ScreenText.last = "OCR помилка: ${e.message}"; cleanup(mp, vd, reader)
+                ScreenText.last = "OCR помилка: ${e.message}"; ScreenText.capturedAt = System.currentTimeMillis(); cleanup(mp, vd, reader)
             } finally { image.close() }
         }, null)
     }

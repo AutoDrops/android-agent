@@ -29,10 +29,14 @@ object RuleScheduler {
 class RuleWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
         val db = AppDb.get(applicationContext)
+        val now = System.currentTimeMillis()
         val rules = runCatching { db.dao().enabledRules() }.getOrDefault(emptyList())
         for (r in rules) {
+            // interval rules fire at most once per their own window, not every 15-min tick
+            if (r.trigger == "interval" && !RulePolicy.isDue(r.lastRun, r.intervalMinutes, now)) continue
             val msg = evaluate(r) ?: continue
             notify(r.name, msg)
+            runCatching { db.dao().update(r.copy(lastRun = now)) }
         }
         return Result.success()
     }
@@ -41,8 +45,18 @@ class RuleWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
         "charging" -> if (isCharging()) "Пристрій заряджається." else null
         "wifi_ssid" -> currentSsid()?.let { if (r.param.isBlank() || it.contains(r.param, true)) "Підключено до Wi-Fi: $it" else null }
         "interval" -> "Періодична перевірка (кожні ${r.intervalMinutes} хв): ${currentSsid() ?: "немає Wi-Fi"}"
+        "battery_low" -> { val t = RulePolicy.batteryThreshold(r.param); val lvl = batteryLevel(); if (RulePolicy.batteryLowTriggered(lvl, t)) "Низький заряд: $lvl% (поріг $t%)." else null }
         else -> null
-    } ?.let { base -> if (r.action == "run_prompt" && r.allowedPrompt.isNotBlank()) "$base\nЗапланований запит очікує підтвердження у застосунку." else base }
+    } ?.let { base ->
+        // run_prompt never executes silently in the background — it is queued for in-app confirmation (risk-gated)
+        if (r.action == "run_prompt" && r.allowedPrompt.isNotBlank())
+            "$base\nЗапланований запит (ризик ${RulePolicy.risk(r.action)}) очікує підтвердження у застосунку." else base
+    }
+
+    private fun batteryLevel(): Int = runCatching {
+        val bm = applicationContext.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+    }.getOrDefault(-1)
 
     private fun isCharging(): Boolean {
         val bm = applicationContext.getSystemService(Context.BATTERY_SERVICE) as BatteryManager

@@ -571,21 +571,48 @@ fun SettingsTab(vm: AgentViewModel) {
         var rName by remember { mutableStateOf("") }
         var rTrigger by remember { mutableStateOf("charging") }
         var rParam by remember { mutableStateOf("") }
+        var rAction by remember { mutableStateOf("notify") }
+        var rPrompt by remember { mutableStateOf("") }
+        var rInterval by remember { mutableStateOf("60") }
+        var rErr by remember { mutableStateOf<String?>(null) }
         OutlinedTextField(rName, { rName = it }, Modifier.fillMaxWidth(), label = { Text("Назва правила", fontFamily = mono) }, singleLine = true,
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        Text("Тригер", fontFamily = mono, color = MxGreen.copy(alpha = .7f), fontSize = 11.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("charging" to "Заряджання", "wifi_ssid" to "Wi-Fi SSID", "interval" to "Періодично").forEach { (id, lbl) ->
+            RulePolicy.TRIGGERS.forEach { (id, lbl) ->
                 FilterChip(rTrigger == id, { rTrigger = id }, { Text(lbl, fontFamily = mono, fontSize = 11.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MxDim, selectedLabelColor = MxGreen, labelColor = MxGreen.copy(alpha = .6f)))
             }
         }
         if (rTrigger == "wifi_ssid") OutlinedTextField(rParam, { rParam = it }, Modifier.fillMaxWidth(), label = { Text("SSID містить…", fontFamily = mono) }, singleLine = true,
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
-        BigButton("Додати правило", { if (rName.isNotBlank()) { vm.addRule(Rule(name = rName, trigger = rTrigger, param = rParam)); rName = ""; rParam = "" } }, Modifier.fillMaxWidth())
-        Text("Правила працюють раз на ~15 хв (ліміт WorkManager), лише читають стан і шлють сповіщення. Дії-запити не виконуються у фоні без підтвердження у застосунку.", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
+        if (rTrigger == "battery_low") OutlinedTextField(rParam, { rParam = it }, Modifier.fillMaxWidth(), label = { Text("Поріг заряду %, напр. 20", fontFamily = mono) }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        if (rTrigger == "interval") OutlinedTextField(rInterval, { rInterval = it }, Modifier.fillMaxWidth(), label = { Text("Інтервал, хв (мін 15)", fontFamily = mono) }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        Text("Дія", fontFamily = mono, color = MxGreen.copy(alpha = .7f), fontSize = 11.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            RulePolicy.ACTIONS.forEach { (id, lbl) ->
+                FilterChip(rAction == id, { rAction = id }, { Text(lbl, fontFamily = mono, fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MxDim, selectedLabelColor = MxGreen, labelColor = MxGreen.copy(alpha = .6f)))
+            }
+        }
+        if (rAction == "run_prompt") OutlinedTextField(rPrompt, { rPrompt = it }, Modifier.fillMaxWidth(), label = { Text("Запит агенту (виконається лише після підтвердження у застосунку)", fontFamily = mono) },
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
+        rErr?.let { Text(it, color = Color(0xFFFF6B6B), fontSize = 11.sp, fontFamily = mono) }
+        BigButton("Додати правило", {
+            val iv = rInterval.toIntOrNull() ?: 60
+            val err = RulePolicy.validate(rName, rTrigger, rAction, iv, rParam)
+            if (err != null) rErr = err else {
+                vm.addRule(Rule(name = rName, trigger = rTrigger, param = rParam, intervalMinutes = iv, action = rAction, allowedPrompt = rPrompt))
+                rName = ""; rParam = ""; rPrompt = ""; rErr = null
+            }
+        }, Modifier.fillMaxWidth())
+        Text("Правила працюють раз на ~15 хв (ліміт WorkManager), лише читають стан і шлють сповіщення. Дія «Запит агенту» НЕ виконується у фоні — вона ставиться в чергу й проходить підтвердження у застосунку (ризик HIGH).", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
         if (rules.isEmpty()) Text("Немає правил.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.5f), fontFamily = mono)
         rules.forEach { r -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("• ${r.name} [${r.trigger}${if (r.param.isNotBlank()) ":" + r.param else ""}]", Modifier.weight(1f), color = MxGreen.copy(alpha = 0.85f), fontSize = 12.sp, fontFamily = mono)
+            Text("• ${r.name} [${r.trigger}${if (r.param.isNotBlank()) ":" + r.param else ""}→${r.action}]", Modifier.weight(1f), color = MxGreen.copy(alpha = if (r.enabled) 0.85f else 0.4f), fontSize = 12.sp, fontFamily = mono)
+            Switch(r.enabled, { on -> vm.setRuleEnabled(r.id, on) })
             TextButton(onClick = { vm.deleteRule(r.id) }) { Text("✕", color = MxGreen) }
         } }
         Divider(color = MxDim)

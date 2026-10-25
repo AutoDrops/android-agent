@@ -234,10 +234,10 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
             risk = { Risk.SENSITIVE }, exec = { db.dao().deleteRag(it.getInt("id").toLong()); "Видалено id=${it.getInt("id")}." }))
 
         // ---- Screen context via MediaProjection + OCR (user-granted capture only) ----
-        add(ToolSpec("screen_ocr", "Return text recognized from the last user-approved screen capture. Start a capture from the Tools tab (MediaProjection consent required).",
-            Schema.obj(required = emptyList()), risk = { Risk.HIGH }, exec = {
-                val t = ScreenText.last
-                if (t.isNullOrBlank()) "Немає захопленого екрана. Натисни «Захопити екран (OCR)» у вкладці Інструменти та дай системний дозвіл." else "Текст з екрана:\n" + t
+        add(ToolSpec("screen_ocr", "Read text from the current screen via OCR (screen_read / ocr_screen): returns text recognized from the last user-approved MediaProjection capture, with capture age and a staleness warning. Start a fresh capture from the Tools tab (consent required). Sensitive: screen contents — gated.",
+            Schema.obj("max_age_sec" to Schema.int("Treat a capture older than this many seconds as stale, default 300", 10, 3600), required = emptyList()),
+            risk = { Risk.HIGH }, exec = {
+                Ocr.formatForAgent(ScreenText.last, ScreenText.capturedAt, System.currentTimeMillis(), it.intOr("max_age_sec", 300))
             }))
 
         // ---- Agentic plan panel (visible multi-step planning) ----

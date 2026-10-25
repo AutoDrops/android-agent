@@ -207,6 +207,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     fun rules() = db.dao().rulesFlow()
     fun addRule(r: Rule) { viewModelScope.launch { db.dao().insert(r); RuleScheduler.ensureScheduled(getApplication()) } }
     fun deleteRule(id: Long) { viewModelScope.launch { db.dao().deleteRule(id) } }
+    fun setRuleEnabled(id: Long, enabled: Boolean) { viewModelScope.launch {
+        db.dao().ruleById(id)?.let { db.dao().update(it.copy(enabled = enabled)); RuleScheduler.ensureScheduled(getApplication()) } } }
 
     val voice by lazy { VoiceInput(getApplication()) }
 

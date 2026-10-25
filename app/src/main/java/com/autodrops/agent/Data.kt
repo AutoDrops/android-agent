@@ -34,24 +34,25 @@ data class RagDoc(
 data class Rule(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val trigger: String,              // wifi_ssid | charging | interval
-    val param: String = "",           // e.g. SSID to watch
+    val trigger: String,              // wifi_ssid | charging | interval | battery_low
+    val param: String = "",           // e.g. SSID to watch, or battery % threshold
     val intervalMinutes: Int = 60,
     val action: String = "notify",    // notify | run_prompt
     val allowedPrompt: String = "",   // pre-granted prompt for run_prompt (still risk-gated in-app)
     val enabled: Boolean = true,
+    val lastRun: Long = 0,            // last time this rule fired (for interval due-gating)
     val ts: Long = System.currentTimeMillis()
 ) {
     fun toJson(): org.json.JSONObject = org.json.JSONObject()
         .put("id", id).put("name", name).put("trigger", trigger).put("param", param)
         .put("intervalMinutes", intervalMinutes).put("action", action)
-        .put("allowedPrompt", allowedPrompt).put("enabled", enabled)
+        .put("allowedPrompt", allowedPrompt).put("enabled", enabled).put("lastRun", lastRun)
     companion object {
         fun fromJson(o: org.json.JSONObject) = Rule(
             id = o.optLong("id"), name = o.optString("name"), trigger = o.optString("trigger"),
             param = o.optString("param"), intervalMinutes = o.optInt("intervalMinutes", 60),
             action = o.optString("action", "notify"), allowedPrompt = o.optString("allowedPrompt"),
-            enabled = o.optBoolean("enabled", true))
+            enabled = o.optBoolean("enabled", true), lastRun = o.optLong("lastRun"))
     }
 }
 
@@ -84,7 +85,9 @@ interface ChatDao {
     @Query("DELETE FROM RagDoc WHERE id = :id") suspend fun deleteRag(id: Long)
     @Query("SELECT * FROM Rule ORDER BY id DESC") fun rulesFlow(): Flow<List<Rule>>
     @Query("SELECT * FROM Rule WHERE enabled = 1") suspend fun enabledRules(): List<Rule>
+    @Query("SELECT * FROM Rule WHERE id = :id LIMIT 1") suspend fun ruleById(id: Long): Rule?
     @Insert suspend fun insert(r: Rule): Long
+    @Update suspend fun update(r: Rule)
     @Query("DELETE FROM Rule WHERE id = :id") suspend fun deleteRule(id: Long)
     @Query("SELECT * FROM DeviceEntity ORDER BY label, ip") fun devicesFlow(): Flow<List<DeviceEntity>>
     @Query("SELECT * FROM DeviceEntity") suspend fun devices(): List<DeviceEntity>
@@ -103,7 +106,7 @@ interface ChatDao {
     @Query("DELETE FROM Conversation") suspend fun wipeConvs()
 }
 
-@Database(entities = [Conversation::class, MessageEntity::class, Recipe::class, RagDoc::class, Rule::class, DeviceEntity::class], version = 4, exportSchema = false)
+@Database(entities = [Conversation::class, MessageEntity::class, Recipe::class, RagDoc::class, Rule::class, DeviceEntity::class], version = 5, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun dao(): ChatDao
     companion object {
