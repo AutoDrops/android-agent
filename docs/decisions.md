@@ -209,3 +209,12 @@ Deferred: Quick Settings Tile screen-assistant (needs a TileService + manifest; 
   2. **`rag_add` risk raised LOW → EFFECT** (writes to on-device storage now require in-app confirmation). `rag_search`/`rag_list` stay LOW; `rag_delete` stays SENSITIVE.
   3. All ingest/search paths (tools, addRag, ingestText, import, chat inject) go through `Embedder`.
 - Gate-not-remove: no features cut. Built + unit-tested; not verified on real hardware (no emulator/KVM). Secret-scan required before commit. No keys in repo.
+
+## v3.16 — own-LAN device/media control completeness + TTS + apps (2026-10-25)
+- **Audit (honest):** `discover_devices` (SSDP/UPnP + mDNS Cast/AirPlay), `dlna_control` (play/pause/stop/get/set volume, EFFECT), `adbtv` (keyevent/launch/shell) were ALREADY present with Protocols.kt parsing. Gaps: no RFC1918 guard on DLNA/ADB targets; no Cast *command* path (discovery only); no TTS; no apps_list/app_launch.
+- **COMPLETED / FIXED:**
+  1. RFC1918 NetGuard on `dlna_control` (host extracted from control URL via `AppsFmt.hostFromUrl`) and `adbtv` host — public targets refused.
+  2. **NEW `cast_control`** (play/stop/status) — CASTV2 protobuf framing + JSON payloads in pure `CastProto`; TLS:8009 socket in `Cast`. Gate: status=SENSITIVE, play/stop=EFFECT. Own-LAN only.
+  3. **NEW `speak`** (LOW) + settings toggle «Озвучувати відповіді (TTS, укр.)» — Android TextToSpeech, Ukrainian preferred. Auto-speaks final assistant replies when enabled.
+  4. **NEW `apps_list`** (LOW) + **`app_launch`** (EFFECT) — launchable apps via PackageManager; package-name validation.
+- Gate-not-remove: nothing cut. Built + unit-tested (V316Test); Cast live socket / TTS voice / app launch **not verified on real hardware** (no emulator/KVM). Secret-scan clean. No keys in repo.

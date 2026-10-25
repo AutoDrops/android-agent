@@ -566,6 +566,7 @@ fun SettingsTab(vm: AgentViewModel) {
         Head("Налаштування")
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.matrixRain, { vm.toggleMatrixRain(it) }); Text("Matrix «цифровий дощ»", color = MxGreen, fontFamily = mono) }
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.stream, { vm.store.stream = it }); Text("Потокові відповіді (stream)", color = MxGreen, fontFamily = mono) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.speakReplies, { vm.store.speakReplies = it }); Text("Озвучувати відповіді (TTS, укр.)", color = MxGreen, fontFamily = mono) }
         Text("Мова: українська (типово), англійська доступна у системних налаштуваннях.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
         Divider(color = MxDim)
         Text("Виконання shell", fontFamily = mono, color = MxGreen)

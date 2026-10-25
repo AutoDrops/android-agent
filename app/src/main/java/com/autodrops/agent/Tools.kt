@@ -7,6 +7,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
@@ -31,6 +32,7 @@ import kotlin.coroutines.resume
 /** Builds the typed tool registry. Unknown tools / invalid args fail closed; risk drives confirmation. */
 class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
     private val db = AppDb.get(ctx)
+    private val speaker by lazy { Speaker(ctx) }
 
     val specs: List<ToolSpec> = buildList {
         add(ToolSpec("network_info", "Current Wi-Fi connection info and local IP addresses. Optional nearby Wi-Fi scan.",
@@ -70,6 +72,24 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
                 "key" to Schema.str("Key e.g. DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT, DPAD_CENTER, HOME, BACK, VOLUME_UP, VOLUME_DOWN"),
                 "command" to Schema.str("Shell command or package to launch"), required = listOf("action", "host")),
             risk = { if (it.str("action") == "shell") Risk.ELEVATED else Risk.EFFECT }, exec = { adbTv(it) }))
+
+        add(ToolSpec("cast_control", "Google Cast (Chromecast) control on YOUR Wi-Fi: play a media URL, stop the running app, or read status. Target must be a private (RFC1918) address.",
+            Schema.obj(
+                "host" to Schema.str("Cast device private IP"),
+                "action" to Schema.str("Action", listOf("play", "stop", "status")),
+                "media_url" to Schema.str("Media URL for play"), required = listOf("host", "action")),
+            risk = { if (it.str("action") == "status") Risk.SENSITIVE else Risk.EFFECT }, exec = { cast(it) }))
+
+        add(ToolSpec("speak", "Read text aloud on this phone via Android TextToSpeech (prefers Ukrainian voice if installed).",
+            Schema.obj("text" to Schema.str("Text to speak"), required = listOf("text")),
+            risk = { Risk.LOW }, exec = { speaker.speak(it.getString("text")) }))
+
+        add(ToolSpec("apps_list", "List launchable apps installed on this phone (label + package).",
+            Schema.obj(required = emptyList()), risk = { Risk.LOW }, exec = { appsList() }))
+
+        add(ToolSpec("app_launch", "Launch an installed app by its package name.",
+            Schema.obj("package" to Schema.str("App package, e.g. com.android.settings"), required = listOf("package")),
+            risk = { Risk.EFFECT }, exec = { appLaunch(it.getString("package")) }))
 
         add(ToolSpec("toggle_settings", "Change or open a device setting: wifi, bluetooth, brightness, volume, dnd, flashlight.",
             Schema.obj("setting" to Schema.str("Setting", listOf("wifi", "bluetooth", "brightness", "volume", "dnd", "flashlight")),
@@ -359,6 +379,10 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
     }
 
     private suspend fun dlna(a: JSONObject): String = withContext(Dispatchers.IO) {
+        val ctrl = a.str("avtransport_url").ifBlank { a.str("rendering_url") }
+        val host = AppsFmt.hostFromUrl(ctrl)
+        if (host == null) return@withContext "Відхилено: не вдалося визначити адресу пристрою з control URL."
+        NetGuard.ensureLocal(host, Lan.localIpv4(), false)?.let { return@withContext it }
         when (a.getString("action")) {
             "play" -> Upnp.play(a.getString("avtransport_url"), a.getString("media_url"))
             "pause" -> Upnp.transport(a.getString("avtransport_url"), "Pause")
@@ -371,6 +395,7 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
 
     private suspend fun adbTv(a: JSONObject): String = withContext(Dispatchers.IO) {
         val host = a.getString("host"); val port = a.intOr("port", 5555)
+        NetGuard.ensureLocal(host, Lan.localIpv4(), false)?.let { return@withContext it }
         runCatching {
             dadb.Dadb.create(host, port).use { db ->
                 when (a.getString("action")) {
@@ -385,6 +410,30 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
                 }.ifBlank { "ok" }
             }
         }.getOrElse { "ADB failed (${it.message}). On Android 11+ enable Wireless debugging and pair first; then use port 5555 after 'adb connect'." }
+    }
+
+    private suspend fun cast(a: JSONObject): String = withContext(Dispatchers.IO) {
+        val host = a.getString("host")
+        NetGuard.ensureLocal(host, Lan.localIpv4(), false)?.let { return@withContext it }
+        Cast.control(host, a.getString("action"), a.str("media_url").ifBlank { null })
+    }
+
+    private fun appsList(): String {
+        val pm = ctx.packageManager
+        val main = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+        val rows = pm.queryIntentActivities(main, 0).map {
+            AppsFmt.AppRow(it.loadLabel(pm).toString(), it.activityInfo.packageName)
+        }.distinctBy { it.pkg }
+        return AppsFmt.format(rows)
+    }
+
+    private fun appLaunch(pkg: String): String {
+        if (!AppsFmt.isValidPackage(pkg)) return "Некоректна назва пакета: $pkg"
+        val intent = ctx.packageManager.getLaunchIntentForPackage(pkg)
+            ?: return "Застосунок '$pkg' не знайдено або не має екрана запуску."
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { ctx.startActivity(intent); "Запущено $pkg." }
+            .getOrElse { "Не вдалося запустити $pkg: ${it.message}" }
     }
 
     private fun openPanel(action: String, note: String): String {

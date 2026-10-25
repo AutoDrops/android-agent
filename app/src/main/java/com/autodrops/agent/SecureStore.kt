@@ -53,6 +53,10 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
     var voskEnabled: Boolean
         get() = prefs.getBoolean("vosk_enabled", false)
         set(v) = prefs.edit().putBoolean("vosk_enabled", v).apply()
+
+    var speakReplies: Boolean
+        get() = prefs.getBoolean("speak_replies", false)
+        set(v) = prefs.edit().putBoolean("speak_replies", v).apply()
     var voskModelId: String
         get() = prefs.getString("vosk_model_id", "small-uk") ?: "small-uk"
         set(v) = prefs.edit().putString("vosk_model_id", v).apply()

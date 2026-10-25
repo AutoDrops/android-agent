@@ -19,6 +19,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDb.get(app)
     private val llm = LlmClient()
     private val reg = ToolRegistry(app, store)
+    private val speaker by lazy { Speaker(app) }
 
     val items = mutableStateListOf<ChatItem>()
     var busy by mutableStateOf(false); private set
@@ -284,7 +285,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         am.isLowRamDevice
     }.getOrDefault(false)
     fun stopLocal() { localJob?.cancel(); LocalLlm.unload(); localBusy = false }
-    override fun onCleared() { super.onCleared(); runCatching { LocalLlm.unload() }; runCatching { voice.stop() } }
+    override fun onCleared() { super.onCleared(); runCatching { LocalLlm.unload() }; runCatching { voice.stop() }; runCatching { speaker.shutdown() } }
 
     // ---- v3.6: Vosk offline voice ----
     val voskModels = VoskCatalog.CATALOG
@@ -508,7 +509,10 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                     if (usage != null) sessionUsage += usage
 
                     val calls = msg.optJSONArray("tool_calls")
-                    if (calls == null || calls.length() == 0) break
+                    if (calls == null || calls.length() == 0) {
+                        if (TtsPolicy.shouldSpeak(store.speakReplies, content)) runCatching { speaker.speak(content) }
+                        break
+                    }
                     for (i in 0 until calls.length()) {
                         val c = calls.getJSONObject(i); val fn = c.getJSONObject("function")
                         val name = fn.getString("name"); val argStr = fn.optString("arguments", "{}")
