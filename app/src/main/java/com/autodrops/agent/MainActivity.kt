@@ -473,6 +473,7 @@ fun NetworkTab(vm: AgentViewModel) {
         Head("Мережа / Пристрої")
         BigButton("Знайти пристрої (mDNS + SSDP)", { vm.send("Знайди пристрої в моїй локальній мережі (mDNS і SSDP) та покажи ТВ і колонки з control URL.") }, Modifier.fillMaxWidth())
         BigButton("Жива карта хостів (ping+ARP)", { vm.send("Запусти net_discover і покажи живі хости моєї підмережі з MAC та іменами.") }, Modifier.fillMaxWidth())
+        BigButton("ARP-скан (хости + MAC + вендор)", { vm.send("Запусти arp_scan і покажи хости моєї підмережі з MAC-адресами та виробниками.") }, Modifier.fillMaxWidth())
         BigButton("Звіт безпеки мережі", { vm.send("Запусти security_report і поясни результати простими словами.") }, Modifier.fillMaxWidth())
         BigButton("Інфо Wi-Fi + локальні IP", { vm.send("Покажи network_info зі скануванням Wi-Fi.") }, Modifier.fillMaxWidth())
         Text("Діагностика хоста (лише приватні IP; кожен скан з підтвердженням)", fontSize = 10.sp, color = MxGreen.copy(alpha = 0.55f), fontFamily = mono)
@@ -489,6 +490,10 @@ fun NetworkTab(vm: AgentViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             BigButton("Трасування", { diag("Зроби traceroute до ${diagIp.trim()}.") }, Modifier.weight(1f))
             BigButton("TLS-сертиф.", { diag("Покажи ssl_cert_info для ${diagIp.trim()}:443.") }, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BigButton("ОС+сервіси (nmap -A)", { diag("Зроби os_detect для ${diagIp.trim()} у моїй LAN: вгадай ОС по TTL і визнач версії сервісів.") }, Modifier.weight(1f))
+            BigButton("MAC → вендор", { vm.send("Запусти mac_vendor для MAC-адрес із мого ARP-скану і покажи виробників.") }, Modifier.weight(1f))
         }
         Divider(color = MxDim)
         Text("Інвентар пристроїв (збережені, з мітками)", fontFamily = mono, color = MxGreen)

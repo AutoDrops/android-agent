@@ -176,6 +176,15 @@ class ToolRegistry(private val ctx: Context, private val store: SecureStore) {
                 "Для безпеки капчур вимкнено за замовчуванням і запускається лише з явної згоди в системному діалозі. Інші функції (виявлення/скан) уже доступні."
             }))
 
+        add(ToolSpec("arp_scan", "ARP scan / host discovery of YOUR current local subnet: ping-sweep then read ARP cache with MAC + vendor. Own network only.",
+            Schema.obj(required = emptyList()), risk = { Risk.EFFECT }, exec = { Lan.arpScan(ctx.cacheDir) }))
+        add(ToolSpec("os_detect", "nmap -A style for ONE local/private host: TTL-based OS guess + banner-grab service/version on open common ports. Public IPs refused.",
+            Schema.obj("host" to Schema.str("IP/host on your LAN"), required = listOf("host")),
+            risk = { Risk.SENSITIVE }, exec = { guard(it.getString("host"), true) ?: Lan.osServiceDetect(it.getString("host")) }))
+        add(ToolSpec("mac_vendor", "Resolve a MAC address OUI to its hardware vendor (bundled table; lazy-downloads the free IEEE OUI file).",
+            Schema.obj("mac" to Schema.str("MAC address AA:BB:CC:DD:EE:FF"), required = listOf("mac")),
+            risk = { Risk.LOW }, exec = { Lan.macVendor(it.getString("mac"), ctx.cacheDir) }))
+
         // ---- Local RAG (on-device embeddings, persists in Room) ----
         add(ToolSpec("rag_add", "Save a note/snippet to the local knowledge base (on-device embeddings).",
             Schema.obj("title" to Schema.str("short title"), "content" to Schema.str("text to remember"), required = listOf("title", "content")),
