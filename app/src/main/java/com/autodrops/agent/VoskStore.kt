@@ -70,7 +70,7 @@ class VoskManager(private val ctx: Context) {
         try {
             val resp = http.newCall(Request.Builder().url(m.url).build()).execute()
             if (!resp.isSuccessful) { resp.close(); return@withContext Progress(0, 0, error = "HTTP ${resp.code}") }
-            if (expectHost != null && resp.request.url.host != expectHost) { resp.close(); return@withContext Progress(0, 0, error = "Заблоковано міжхостовий редірект") }
+            if (expectHost != null && !DownloadRedirects.allowed(expectHost, resp.request.url.host)) { resp.close(); return@withContext Progress(0, 0, error = "Заблоковано міжхостовий редірект на ${resp.request.url.host}") }
             val body = resp.body ?: return@withContext Progress(0, 0, error = "порожня відповідь")
             val total = body.contentLength()
             val md = MessageDigest.getInstance("SHA-256")

@@ -58,11 +58,32 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         while (history.length() > 1) history.remove(1)
     }
 
+    /** v3.21: reactive key presence + explicit live connection check with on-screen result. */
+    var hasKey by mutableStateOf(store.effectiveKey.isNotBlank())
+    var connStatus by mutableStateOf("")
+    var connBusy by mutableStateOf(false)
+    fun saveKey(k: String) { if (k.isNotBlank()) store.apiKey = k; hasKey = store.effectiveKey.isNotBlank(); if (hasKey) testConnection() }
+    fun clearKey() { store.clearApiKey(); hasKey = store.effectiveKey.isNotBlank(); connStatus = "Ключ видалено." }
+    fun testConnection() {
+        if (store.effectiveKey.isBlank()) { connStatus = "ПОМИЛКА: Введіть ключ OpenRouter."; return }
+        val hv = Security.checkHost(store.baseUrl)
+        if (!hv.allowed) { connStatus = "ПОМИЛКА: ${hv.warning}"; return }
+        connBusy = true; connStatus = "Перевіряю з'єднання з ${hv.host}…"
+        viewModelScope.launch {
+            connStatus = runCatching {
+                val m = llm.complete(store.baseUrl, store.effectiveKey, store.model,
+                    JSONArray().put(JSONObject().put("role", "user").put("content", "Reply with OK.")), JSONArray(), false) {}
+                "✓ З'єднання працює (${store.model}): ${m.optString("content").take(60)}"
+            }.getOrElse { "ПОМИЛКА: " + Protocols.friendlyError(it.message ?: it.javaClass.simpleName) }
+            connBusy = false
+        }
+    }
+
     fun loadModels() {
-        if (store.apiKey.isBlank()) { modelsError = "Set API key first"; return }
+        if (store.effectiveKey.isBlank()) { modelsError = "Set API key first"; return }
         viewModelScope.launch {
             modelsError = null
-            runCatching { llm.models(store.baseUrl, store.apiKey) }
+            runCatching { llm.models(store.baseUrl, store.effectiveKey) }
                 .onSuccess { models = it }.onFailure { modelsError = Protocols.friendlyError(it.message) }
         }
     }
@@ -86,7 +107,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun runReview(paths: List<String>, model: String) {
-        if (store.apiKey.isBlank()) { reviewError = "Add your API key in the Models tab first."; return }
+        if (store.effectiveKey.isBlank()) { reviewError = "Add your API key in the Models tab first."; return }
         if (paths.isEmpty()) { reviewError = "Select at least one file to review."; return }
         val hv = Security.checkHost(store.baseUrl)
         if (!hv.allowed) { reviewError = hv.warning ?: "Небезпечна адреса сервера."; return }
@@ -102,7 +123,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                     .put(JSONObject().put("role", "system").put("content",
                         "You are a senior code reviewer. Give a concise, prioritized review: bugs, security, style, with concrete fixes."))
                     .put(JSONObject().put("role", "user").put("content", "Review these files:\n\n$blob"))
-                val msg = llm.complete(store.baseUrl, store.apiKey, model.ifBlank { store.model }, msgs, JSONArray(), false) {}
+                val msg = llm.complete(store.baseUrl, store.effectiveKey, model.ifBlank { store.model }, msgs, JSONArray(), false) {}
                 reviewResult = msg.optString("content", "").ifBlank { "(empty response)" }
             } catch (e: Exception) { reviewError = Protocols.friendlyError(e.message) }
             finally { reviewBusy = false }
@@ -185,8 +206,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                 val seed = getApplication<Application>().assets.open("models_seed.json").bufferedReader().use { it.readText() }
                 catalog = ModelCatalog.parse(seed)
             }
-            if (forceLive && store.apiKey.isNotBlank()) runCatching {
-                val live = llm.models(store.baseUrl, store.apiKey)
+            if (forceLive && store.effectiveKey.isNotBlank()) runCatching {
+                val live = llm.models(store.baseUrl, store.effectiveKey)
                 catalog = live.map { ModelMeta(it.id, it.name, it.context, it.promptPrice, it.completionPrice, emptyList(), "", if (it.tools) listOf("tools") else emptyList()) }
             }
             catalogBusy = false
@@ -246,6 +267,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
     val localModels = ModelCatalogLocal.CATALOG
     private val modelMgr by lazy { LocalModelManager(getApplication()) }
     var modelDownloading by mutableStateOf<String?>(null)
+    var modelBytes by mutableStateOf(0L)
+    var modelTotal by mutableStateOf(0L)
     var modelProgress by mutableStateOf(0f)
     var modelStatus by mutableStateOf("")
     fun isModelDownloaded(m: LocalModel) = modelMgr.isDownloaded(m)
@@ -254,17 +277,33 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         if (modelDownloading != null) return
         val free = runCatching { val sf = android.os.StatFs(getApplication<android.app.Application>().filesDir.path); sf.availableBytes }.getOrDefault(Long.MAX_VALUE)
         if (free < m.sizeMb * 1_258_291L /* sizeMb*1.2MB */) { modelStatus = "Недостатньо місця: потрібно ~${(m.sizeMb*1.2).toInt()} МБ вільного."; return }
-        modelDownloading = m.id; modelProgress = 0f; modelStatus = "Завантаження ${m.name}…"
+        modelDownloading = m.id; modelProgress = 0f; modelBytes = 0; modelTotal = m.sizeMb * 1_048_576L; modelStatus = "Завантаження ${m.name}…"
         viewModelScope.launch {
-            val p = modelMgr.download(m) { pr -> if (pr.totalBytes > 0) modelProgress = pr.downloadedBytes.toFloat() / pr.totalBytes }
+            val p = modelMgr.download(m) { pr -> modelBytes = pr.downloadedBytes; modelTotal = maxOf(pr.totalBytes, m.sizeMb * 1_048_576L); if (modelTotal > 0) modelProgress = pr.downloadedBytes.toFloat() / modelTotal }
             modelStatus = when {
                 p.error != null -> "Помилка: ${p.error}"
                 p.verified -> "Готово. SHA-256 перевірено."
                 p.done -> "Завантажено. SHA-256 зафіксовано (TOFU): ${modelMgr.observedHash(m)?.take(16)}…"
                 else -> "Завершено."
             }
-            if (p.done && p.verified) store.selectedLocalModel = m.id
+            if (p.done && p.error == null) store.selectedLocalModel = m.id
             modelDownloading = null
+        }
+    }
+    /** v3.21: explicit "Запустити" — load the model and run a short test generation, result shown on screen. */
+    var localRunStatus by mutableStateOf("")
+    fun startLocalModel(m: LocalModel) {
+        if (localBusy) return
+        store.selectedLocalModel = m.id; localBusy = true; localRunStatus = "Завантажую ${m.name} у памʼять…"
+        viewModelScope.launch {
+            val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                runCatching {
+                    if (!OnDeviceLlm.ensureLoaded(getApplication(), m, modelMgr.fileFor(m))) "ПОМИЛКА: ${OnDeviceLlm.lastError ?: "рушій не зміг завантажити модель"}"
+                    else OnDeviceLlm.generate("Привіт! Відповідай одним реченням.")?.let { "✓ Модель працює. Відповідь: ${it.take(200)}" }
+                        ?: "ПОМИЛКА генерації: ${OnDeviceLlm.lastError ?: "невідома"}"
+                }.getOrElse { "ПОМИЛКА: ${it.javaClass.simpleName}: ${it.message}" }
+            }
+            localRunStatus = r; localBusy = false
         }
     }
     fun deleteModel(m: LocalModel) {
@@ -402,8 +441,8 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val out = ArrayList<CheckResult>()
             // 1. API reachability with the in-app key (read-only GET /models).
-            if (store.apiKey.isBlank()) out.add(CheckResult("API-ключ / доступ до моделей", CheckStatus.FAIL, "Ключ не задано у вкладці «Моделі»."))
-            else out.add(runCatching { llm.models(store.baseUrl, store.apiKey) }.fold(
+            if (store.effectiveKey.isBlank()) out.add(CheckResult("API-ключ / доступ до моделей", CheckStatus.FAIL, "Ключ не задано у вкладці «Моделі»."))
+            else out.add(runCatching { llm.models(store.baseUrl, store.effectiveKey) }.fold(
                 { if (it.isNotEmpty()) CheckResult("API-ключ / доступ до моделей", CheckStatus.PASS, "OK: ${it.size} моделей (${Security.checkHost(store.baseUrl).host ?: store.baseUrl})")
                   else CheckResult("API-ключ / доступ до моделей", CheckStatus.WARN, "Відповідь без моделей.") },
                 { CheckResult("API-ключ / доступ до моделей", CheckStatus.FAIL, Protocols.friendlyError(it.message)) }))
@@ -513,7 +552,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
 
     fun send(text: String) {
         if (text.isBlank() || busy) return
-        if (store.apiKey.isBlank()) { add("error", "Add your API key in the Models tab to start chatting."); return }
+        if (store.effectiveKey.isBlank()) { add("error", "Введіть ключ OpenRouter: вкладка «Моделі» → поле «API ключ» → «Зберегти»."); return }
         val hv = Security.checkHost(store.baseUrl)
         if (!hv.allowed) { add("error", hv.warning ?: "Небезпечна адреса сервера."); return }
         ModelValidation.validateSlug(store.model, catalog.map { it.id })?.let { add("error", it); return }
@@ -562,7 +601,7 @@ class AgentViewModel(app: Application) : AndroidViewModel(app) {
                     val supportsTools = catalog.firstOrNull { it.id == routedModel }?.let { it.params.isEmpty() || it.params.contains("tools") } ?: true
                     val toolSpec = if (supportsTools) reg.openAiTools() else JSONArray()
                     val streamItem = if (streaming) add("assistant", "") else null
-                    val msg = llm.complete(store.baseUrl, store.apiKey, routedModel, history, toolSpec, streaming) { delta ->
+                    val msg = llm.complete(store.baseUrl, store.effectiveKey, routedModel, history, toolSpec, streaming) { delta ->
                         streamItem?.let { it.text += delta; items[items.indexOf(it)] = it.copy(text = it.text) }
                     }
                     val usage = parseUsage(msg); msg.remove("_usage")

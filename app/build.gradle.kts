@@ -2,15 +2,7 @@ import java.util.Properties
 
 // Build-time OpenRouter key: env OPENROUTER_API_KEY, else local.properties `openrouter.api.key`.
 // NEVER committed (local.properties + *.apk are gitignored). Empty string if absent.
-fun resolveEmbeddedKey(): String {
-    System.getenv("OPENROUTER_API_KEY")?.takeIf { it.isNotBlank() }?.let { return it }
-    val lp = rootProject.file("local.properties")
-    if (lp.exists()) {
-        val p = Properties(); lp.inputStream().use { p.load(it) }
-        p.getProperty("openrouter.api.key")?.takeIf { it.isNotBlank() }?.let { return it }
-    }
-    return ""
-}
+fun resolveEmbeddedKey(): String = "" // never embed any key in any build (Bohdan, v3.21)
 
 plugins {
     id("com.android.application")
@@ -23,7 +15,7 @@ android {
     namespace = "com.autodrops.agent"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 23; versionName = "3.20"
+        applicationId = "com.autodrops.agent"; minSdk = 26; targetSdk = 34; versionCode = 24; versionName = "3.21"
         buildConfigField("String", "EMBEDDED_API_KEY", "\"${resolveEmbeddedKey()}\"")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }

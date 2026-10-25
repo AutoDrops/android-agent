@@ -46,7 +46,7 @@ class LocalModelManager(private val ctx: Context) {
                     val resp = http.newCall(Request.Builder().url(u).build()).execute()
                     if (!resp.isSuccessful) { resp.close(); return@withContext Progress(got, declaredTotal, error = "HTTP ${resp.code}") }
                     // block cross-host redirects (domain-swap TOFU)
-                    if (expectHost != null && resp.request.url.host != expectHost) { resp.close(); return@withContext Progress(got, declaredTotal, error = "Заблоковано міжхостовий редірект") }
+                    if (expectHost != null && !DownloadRedirects.allowed(expectHost, resp.request.url.host)) { resp.close(); return@withContext Progress(got, declaredTotal, error = "Заблоковано міжхостовий редірект на ${resp.request.url.host}") }
                     val body = resp.body ?: return@withContext Progress(got, declaredTotal, error = "empty body")
                     val partLen = body.contentLength(); if (partLen > 0) declaredTotal += partLen
                     body.byteStream().use { ins ->

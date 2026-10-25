@@ -101,6 +101,9 @@ class SecureStore internal constructor(private val prefs: android.content.Shared
         get() = prefs.getString("embedding_model", RemoteEmbeddings.DEFAULT_MODEL) ?: RemoteEmbeddings.DEFAULT_MODEL
         set(v) = prefs.edit().putString("embedding_model", v.trim()).apply()
 
+    /** Key actually used for requests: user-entered key overrides the build-time embedded one. */
+    val effectiveKey: String get() = apiKey.ifBlank { BuildConfig.EMBEDDED_API_KEY.trim() }
+    val usingEmbeddedKey: Boolean get() = apiKey.isBlank() && BuildConfig.EMBEDDED_API_KEY.isNotBlank()
     fun seedEmbeddedKeyIfNeeded() {
         if (prefs.getBoolean("key_seeded", false)) return
         val embedded = BuildConfig.EMBEDDED_API_KEY

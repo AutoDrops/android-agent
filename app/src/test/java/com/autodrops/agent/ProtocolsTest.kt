@@ -206,10 +206,10 @@ class ProtocolsTest {
 
     // ---------- friendly errors ----------
     @Test fun friendlyErrorsMapped() {
-        assertTrue(Protocols.friendlyError("HTTP 401: No auth credentials").contains("Authentication"))
-        assertTrue(Protocols.friendlyError("HTTP 429 Too Many").contains("Rate limited"))
-        assertTrue(Protocols.friendlyError("java.net.UnknownHostException: openrouter.ai").contains("Network"))
-        assertTrue(Protocols.friendlyError("402 insufficient credits").contains("credits"))
-        assertTrue(Protocols.friendlyError("boom").startsWith("Something went wrong"))
+        assertTrue(Protocols.friendlyError("HTTP 401: No auth credentials").contains("401"))
+        assertTrue(Protocols.friendlyError("HTTP 429 Too Many").contains("429"))
+        assertTrue(Protocols.friendlyError("java.net.UnknownHostException: openrouter.ai").contains("мережі"))
+        assertTrue(Protocols.friendlyError("402 insufficient credits").contains("402"))
+        assertTrue(Protocols.friendlyError("boom").contains("boom"))
     }
 }

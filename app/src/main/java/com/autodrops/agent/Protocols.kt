@@ -130,17 +130,25 @@ object Protocols {
     /** Friendly, non-leaking error text for the UI. */
     fun friendlyError(raw: String?): String {
         val m = raw ?: "Unknown error"
+        val hint = friendlyHint(m)
+        // Always show the raw HTTP code/message too — never hide the real cause.
+        return if (hint == null) "Помилка: ${m.take(400)}" else "$hint\n[${m.take(300)}]"
+    }
+    private fun friendlyHint(m: String): String? {
         return when {
             m.contains("401") || m.contains("No auth", true) || m.contains("invalid_api_key", true) ->
-                "Authentication failed — check your API key in the Models tab."
+                "Ключ відхилено (401) — перевір API ключ у вкладці «Моделі»."
             m.contains("402") || m.contains("insufficient", true) || m.contains("credits", true) ->
-                "Out of credits on this provider."
-            m.contains("429") -> "Rate limited — wait a moment and try again."
-            m.startsWith("HTTP 5") || m.contains("502") || m.contains("503") -> "The provider is temporarily unavailable."
+                "Немає кредитів на OpenRouter (402)."
+            m.contains("429") -> "Ліміт запитів (429) — зачекай і повтори."
+            m.startsWith("HTTP 5") || m.contains("502") || m.contains("503") -> "Провайдер тимчасово недоступний (5xx)."
             m.contains("UnknownHost", true) || m.contains("Unable to resolve", true) || m.contains("timeout", true) ->
-                "Network problem — check your connection."
+                "Немає мережі або таймаут — перевір інтернет."
             m.contains("not enabled", true) || m.contains("not granted", true) -> m
-            else -> "Something went wrong: ${m.take(160)}"
+            m.contains("SSL", true) || m.contains("Certificate", true) -> "Проблема TLS/сертифіката (VPN/проксі?)."
+            m.contains("ConnectException", true) || m.contains("Failed to connect", true) || m.contains("ECONNREFUSED", true) ->
+                "Немає з'єднання з сервером — перевір інтернет/VPN."
+            else -> null
         }
     }
 }

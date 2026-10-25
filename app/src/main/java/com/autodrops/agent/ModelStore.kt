@@ -93,12 +93,12 @@ object ModelCatalogLocal {
             note = "GGUF Q4; рушій llama.cpp вшито. SHA не закріплено (TOFU) — не авто-вибір."),
         LocalModel(
             id = "smollm2-360m-instruct-q4",
-            name = "SmolLM2-360M-Instruct (GGUF Q4) — завантаження",
-            url = "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF/resolve/main/smollm2-360m-instruct-q4_k_m.gguf",
-            sizeMb = 270,
-            sha256 = "",
+            name = "SmolLM2-360M-Instruct (GGUF Q8) — завантаження",
+            url = "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF/resolve/main/smollm2-360m-instruct-q8_0.gguf",
+            sizeMb = 369,
+            sha256 = "48ab3034d0dd401fbc721eb1df3217902fee7dab9078992d66431f09b7750201",
             engine = "gguf",
-            note = "GGUF Q4; рушій llama.cpp вшито. SHA не закріплено (TOFU) — не авто-вибір.")
+            note = "GGUF Q8; рушій llama.cpp вшито. SHA-256 закріплено (з HF LFS). v3.21: старе посилання q4_k_m давало 404 — виправлено.")
     )
     fun byId(id: String) = CATALOG.firstOrNull { it.id == id }
     fun runnable() = CATALOG.filter { it.isRunnable }

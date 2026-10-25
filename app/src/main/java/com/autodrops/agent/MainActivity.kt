@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -93,6 +94,8 @@ fun Root(vm: AgentViewModel = viewModel(), shared: String?, tileAction: String? 
         }
     }
     LaunchedEffect(Unit) { vm.loadCatalog() }
+    var booting by rememberSaveable { mutableStateOf(vm.matrixRain) }
+    if (booting) { BootScreen(vm) { booting = false }; return }
     val tabs = listOf("Чат" to Icons.Default.Chat, "Моделі" to Icons.Default.Memory, "Засоби" to Icons.Default.Build,
         "Код" to Icons.Default.Code, "Мережа" to Icons.Default.Wifi, "Налашт." to Icons.Default.Settings)
     Box(Modifier.fillMaxSize().background(MxBg)) {
@@ -160,11 +163,14 @@ fun ChatTab(vm: AgentViewModel, onOpenModels: () -> Unit, onPalette: () -> Unit)
             Text("▾ ${vm.store.model.substringAfterLast('/')}", Modifier.clickable { onOpenModels() }, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp)
         }
         PlanPanel()
-        if (vm.items.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (vm.matrixRain) {
-                MatrixRain(true, Modifier.matchParentSize())
-                Box(Modifier.matchParentSize().background(MxBg.copy(alpha = 0.72f)))
+        if (!vm.hasKey) Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpenModels() },
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF2A0E0E)), border = MxCardBorder) {
+            Column(Modifier.padding(14.dp)) {
+                Text("⚠ Введіть ключ OpenRouter", color = Color(0xFFFF6E6E), fontFamily = mono, fontSize = 17.sp)
+                Text("Без ключа чат не працює. Тап → вкладка «Моделі» → «API ключ» → «Зберегти». Ключ зберігається лише в Android Keystore.", color = MxGreen, fontFamily = mono, fontSize = 12.sp)
             }
+        }
+        if (vm.items.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth()) {
             Empty("> Запитай агента: переглянь телефон, скануй мережу, знайди ТВ або напиши й запусти код.")
         }
         else LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), reverseLayout = true) {
@@ -245,14 +251,16 @@ fun ModelsTab(vm: AgentViewModel, onPicked: () -> Unit) {
             visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(),
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = mono, color = MxGreen))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            BigButton("Зберегти", { if (key.isNotBlank()) vm.store.apiKey = key; vm.store.baseUrl = base.ifBlank { SecureStore.DEFAULT_BASE }; vm.loadModels() })
+            BigButton("Зберегти", { vm.store.baseUrl = base.ifBlank { SecureStore.DEFAULT_BASE }; vm.saveKey(key); key = ""; vm.loadModels() })
             BigButton(stringRes(vm, "Оновити"), { vm.loadCatalog(forceLive = true) })
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (vm.store.apiKey.isNotBlank()) Text("Ключ: збережено ✓", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono, modifier = Modifier.align(Alignment.CenterVertically))
+            if (vm.hasKey) Text("Ключ: збережено ✓", fontSize = 11.sp, color = MxGreen.copy(alpha = 0.7f), fontFamily = mono, modifier = Modifier.align(Alignment.CenterVertically))
             else Text("Ключ: відсутній", fontSize = 11.sp, color = Color(0xFFFFC107), fontFamily = mono, modifier = Modifier.align(Alignment.CenterVertically))
-            TextButton(onClick = { vm.store.clearApiKey(); key = "" }) { Text("Очистити ключ", color = MxGreen, fontFamily = mono, fontSize = 12.sp) }
+            TextButton(onClick = { vm.clearKey(); key = "" }) { Text("Очистити ключ", color = MxGreen, fontFamily = mono, fontSize = 12.sp) }
         }
+        BigButton(if (vm.connBusy) "Перевірка…" else "Перевірити з'єднання", { vm.testConnection() }, enabled = !vm.connBusy)
+        if (vm.connStatus.isNotBlank()) Text(vm.connStatus, fontSize = 13.sp, fontFamily = mono, color = if (vm.connStatus.startsWith("ПОМИЛКА")) Color(0xFFFF6E6E) else MxGreen)
         Text("Поточна: ${vm.store.model}", fontSize = 12.sp, color = MxGreen, fontFamily = mono)
         if (vm.catalogBusy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MxGreen)
         // category chips
@@ -614,7 +622,7 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
             BigButton("Самотест пристрою", { sub = "selftest" }, Modifier.weight(1f))
         }
         BigButton("Екран дозволів (онбординг)", { showOb = true }, Modifier.fillMaxWidth())
-        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.matrixRain, { vm.toggleMatrixRain(it) }, colors = mxSwitchColors()); Text("Matrix «цифровий дощ»", color = MxGreen, fontFamily = mono) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.matrixRain, { vm.toggleMatrixRain(it) }, colors = mxSwitchColors()); Text("Boot-екран при старті (Parrot-style лог)", color = MxGreen, fontFamily = mono) }
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.stream, { vm.store.stream = it }, colors = mxSwitchColors()); Text("Потокові відповіді (stream)", color = MxGreen, fontFamily = mono) }
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(vm.store.speakReplies, { vm.store.speakReplies = it }, colors = mxSwitchColors()); Text("Озвучувати відповіді (TTS, укр.)", color = MxGreen, fontFamily = mono) }
         Text("Мова: українська (типово), англійська доступна у системних налаштуваннях.", fontSize = 12.sp, color = MxGreen.copy(alpha = 0.6f), fontFamily = mono)
@@ -744,15 +752,19 @@ fun SettingsTab(vm: AgentViewModel, askPerms: () -> Unit) {
                 Column(Modifier.padding(10.dp)) {
                     Text(m.name, color = MxGreen, fontFamily = mono, fontSize = 13.sp)
                     Text("~${m.sizeMb} МБ · ${m.note}", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
-                    if (vm.modelDownloading == m.id) { LinearProgressIndicator(progress = vm.modelProgress, modifier = Modifier.fillMaxWidth().padding(top = 4.dp), color = MxGreen) }
+                    if (vm.modelDownloading == m.id) {
+                        LinearProgressIndicator(progress = vm.modelProgress.coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth().height(10.dp).padding(top = 4.dp), color = MxGreen, trackColor = MxDim)
+                        Text("${(vm.modelProgress * 100).toInt().coerceIn(0, 100)}% · ${vm.modelBytes / 1_048_576} / ${vm.modelTotal / 1_048_576} МБ", color = MxGreen, fontFamily = mono, fontSize = 13.sp)
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
                         if (!have) BigButton(if (vm.modelDownloading == m.id) "Завантаження…" else "Завантажити", { vm.downloadModel(m) }, enabled = vm.modelDownloading == null)
-                        else { Text("✓ на диску (${vm.modelSizeMb(m)} МБ)", color = MxGreen, fontFamily = mono, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterVertically)); TextButton(onClick = { vm.deleteModel(m) }) { Text("Видалити", color = MxGreen, fontFamily = mono, fontSize = 12.sp) } }
+                        else { Text("✓ на диску (${vm.modelSizeMb(m)} МБ)", color = MxGreen, fontFamily = mono, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterVertically)); BigButton(if (vm.localBusy) "Запуск…" else "Запустити", { vm.startLocalModel(m) }, enabled = !vm.localBusy); TextButton(onClick = { vm.deleteModel(m) }) { Text("Видалити", color = MxGreen, fontFamily = mono, fontSize = 12.sp) } }
                     }
                     if (have) Text(vm.localLlmStatus(m), color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 10.sp)
                 }
             }
         }
+        if (vm.localRunStatus.isNotBlank()) Text(vm.localRunStatus, color = if (vm.localRunStatus.startsWith("ПОМИЛКА")) Color(0xFFFF6E6E) else MxGreen, fontFamily = mono, fontSize = 12.sp)
         if (vm.modelStatus.isNotBlank()) Text(vm.modelStatus, color = MxGreen.copy(alpha = 0.8f), fontFamily = mono, fontSize = 11.sp)
         // ---- v3.6: honest on-device self-check ----
         BigButton(if (vm.selfCheckBusy) "Діагностика…" else "Самодіагностика рушія (on-device)", { vm.runSelfCheck() }, enabled = !vm.selfCheckBusy)
@@ -970,5 +982,41 @@ fun DeviceSelfTestScreen(vm: AgentViewModel, onBack: () -> Unit) {
             }
         }
         if (results.isEmpty() && !vm.deviceTestBusy) Box(Modifier.weight(1f)) { Empty("Натисни «Запустити самотест».") }
+    }
+}
+
+
+/** v3.21: Parrot-Security-style boot log: black screen, green lines scrolling ~2.5s, tap to skip. */
+object BootLog {
+    fun lines(hasKey: Boolean, model: String, version: String): List<String> = listOf(
+        "[  0.000000] DRON.exe $version booting…",
+        "[  0.041872] kernel: Kotlin/Compose runtime ............ [ OK ]",
+        "[  0.118230] keystore: AES-256-GCM master key .......... [ OK ]",
+        "[  0.203117] net: TLS 1.3, cleartext disabled .......... [ OK ]",
+        "[  0.311004] firewall: RFC1918-only LAN tools .......... [ OK ]",
+        "[  0.402551] tools: shell / files / LAN / TV / a11y .... [ OK ]",
+        "[  0.517333] llm: engines MediaPipe + llama.cpp ........ [ OK ]",
+        "[  0.620981] openrouter: api key ....................... " + if (hasKey) "[ OK ]" else "[FAIL] Введіть ключ OpenRouter",
+        "[  0.733410] model: $model",
+        "[  0.845120] ui: kali-dark high-contrast ............... [ OK ]",
+        "[  0.951777] Starting agent shell…",
+        "",
+        "root@dron:~# _")
+}
+
+@Composable
+fun BootScreen(vm: AgentViewModel, onDone: () -> Unit) {
+    val all = remember { BootLog.lines(vm.hasKey, vm.store.model, BuildConfig.VERSION_NAME) }
+    var shown by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (shown < all.size) { kotlinx.coroutines.delay(180); shown++ }
+        kotlinx.coroutines.delay(400); onDone()
+    }
+    Column(Modifier.fillMaxSize().background(Color.Black).clickable { onDone() }.systemBarsPadding().padding(12.dp)) {
+        all.take(shown).forEach { l ->
+            Text(l, color = if (l.contains("[FAIL]")) Color(0xFFFF6E6E) else MxGreen, fontFamily = mono, fontSize = 12.sp)
+        }
+        Spacer(Modifier.weight(1f))
+        Text("тап — пропустити", color = MxGreen.copy(alpha = 0.6f), fontFamily = mono, fontSize = 11.sp)
     }
 }
